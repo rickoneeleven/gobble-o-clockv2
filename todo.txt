@@ -47,26 +47,24 @@ Key Design Decisions & Logic Details:
 --- Phase 0: Project Setup & Foundation ---
 
 [COMPLETED] - Create local Git repository for the project.
+
 [COMPLETED] - Create remote Git repository (e.g., GitHub, GitLab) and link local repo.
+
 [COMPLETED] - Create a new Wear OS project in Android Studio (using "Empty Wear App" template - Kotlin, Compose).
+
 [COMPLETED] - Configure initial `.gitignore` to ignore `.idea/`, `local.properties`, `build/` etc.
+
 [COMPLETED] - Commit initial project structure and gitignore to Git.
 
-- Configure `gradle/libs.versions.toml` and `app/build.gradle.kts` with *remaining* necessary dependencies: Health Services, Jetpack DataStore (Preferences), ViewModel, Lifecycle Service, Coroutines (if not already present).
-    - `androidx.health:health-services-client`
-    - `androidx.datastore:datastore-preferences`
-    - `androidx.lifecycle:lifecycle-viewmodel-ktx`
-    - `androidx.lifecycle:lifecycle-viewmodel-compose`
-    - `androidx.lifecycle:lifecycle-service`
-    - `org.jetbrains.kotlinx:kotlinx-coroutines-android` (verify if present)
+[COMPLETED] - Configure `gradle/libs.versions.toml` and `app/build.gradle.kts` with *remaining* necessary dependencies: Health Services, Jetpack DataStore (Preferences), ViewModel, Lifecycle Service, Coroutines (if not already present).
 
-- Sync Gradle project (`File` > `Sync Project with Gradle Files`).
+[COMPLETED] - Sync Gradle project (`File` > `Sync Project with Gradle Files`).
 
-- Verify basic project setup runs on an emulator or physical Galaxy Watch 4+ after adding dependencies.
+[COMPLETED] - Verify basic project setup runs on an emulator or physical Galaxy Watch 4+ after adding dependencies. (Implicitly done by connecting device/syncing)
 
-- Set up initial project structure (packages: e.g., `presentation`, `service`, `data`, `logging`, `util`) under `app/src/main/java/com/example/gobble_o_clockv2/`. (Note: Template uses `presentation` already).
+[COMPLETED] - Set up initial project structure (packages: e.g., `presentation`, `service`, `data`, `logging`, `util`) under `app/src/main/java/com/example/gobble_o_clockv2/`.
 
-- Commit dependency and package structure setup to Git.
+[COMPLETED] - Commit dependency and package structure setup to Git.
 
 --- Phase 1: Persistence Layer (DataStore) ---
 
@@ -76,7 +74,7 @@ Key Design Decisions & Logic Details:
 
 - Create a `PreferencesRepository` class encapsulating DataStore read/write operations using Kotlin Flows. Implement functions for each key with defaults. Use dependency injection principles if comfortable, or simple instantiation for now.
 
-- Add basic unit tests or manual checks for DataStore read/write functionality if feasible without full UI/Service.
+- Add manual checks for DataStore read/write functionality if feasible without full UI/Service??
 
 - Commit persistence layer to Git.
 
@@ -187,47 +185,3 @@ Key Design Decisions & Logic Details:
 - Add "Clear Logs" button functionality. Consider basic rotation/size limit if needed later.
 
 - Commit logging implementation and viewer UI to Git.
-
---- Phase 8: Testing, Refinement & Optimization ---
-
-- Perform thorough manual testing on emulator and physical Galaxy Watch 4+.
-
-- Test Scenario: Background Reliability (long duration runs).
-
-- Test Scenario: Sampling Accuracy (check file logs vs. ~1min goal, tune gate value if needed).
-
-- Test Scenario: State Persistence (restarts).
-
-- Test Scenario: Trigger Logic (various HR inputs).
-
-- Test Scenario: Reset Logic.
-
-- Test Scenario: Permissions Flow (grant, deny, revoke, including Notifications).
-
-- Test Scenario: Alerting (verify notification triggers).
-
-- Test Scenario: Log Viewer (verify logs captured, displayed, cleared).
-
-- Monitor battery drain on physical device. Optimize if necessary (ensure listener unregisters, check wake locks if any were added inadvertently - `WAKE_LOCK` permission might be removable).
-
-- Refine UI/UX based on testing.
-
-- Add `try-catch` blocks around file I/O, DataStore, Health Services calls. Log errors to both Logcat and file logger.
-
-- Commit testing fixes and refinements to Git.
-
---- Phase 9: Final Polish & Documentation ---
-
-- Code review and refactoring for clarity, efficiency.
-
-- Add/review code comments.
-
-- Review all log messages (Logcat & file) for clarity.
-
-- Update project `README.md` with setup, usage, logic explanation (Target HR, Sampling), known issues.
-
-- Create release build configuration if needed (e.g., enable minifaction, code shrinking).
-
-- Final code backup and repository cleanup/tagging.
-
-- Project Complete (v2).
