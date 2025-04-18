@@ -50,6 +50,15 @@ dependencies {
     implementation(libs.wear.tooling.preview)
     implementation(libs.activity.compose)
     implementation(libs.core.splashscreen)
+
+    // Added Dependencies per Phase 0
+    implementation(libs.health.services.client)
+    implementation(libs.datastore.preferences)
+    implementation(libs.lifecycle.viewmodel.ktx)
+    implementation(libs.lifecycle.viewmodel.compose)
+    implementation(libs.lifecycle.service)
+    implementation(libs.kotlinx.coroutines.android) // Included explicitly
+
     androidTestImplementation(platform(libs.compose.bom))
     androidTestImplementation(libs.ui.test.junit4)
     debugImplementation(libs.ui.tooling)
