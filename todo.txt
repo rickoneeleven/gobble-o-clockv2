@@ -68,37 +68,44 @@ Key Design Decisions & Logic Details:
 
 --- Phase 1: Persistence Layer (DataStore) ---
 
-- Define DataStore preference keys as specified in Project Brief (`appState`, `consecutiveCount`, `targetHeartRate`, `lastProcessedTimestamp`, `lastDisplayedHr`) in a suitable constants file (e.g., `data/DataStoreKeys.kt`).
+[COMPLETED] - Define DataStore preference keys as specified in Project Brief (`appState`, `consecutiveCount`, `targetHeartRate`, `lastProcessedTimestamp`, `lastDisplayedHr`) in a suitable constants file (e.g., `data/DataStoreKeys.kt`).
 
-- Define `AppState` enum or sealed class/constants ("MONITORING", "GOBBLE_TIME").
+[COMPLETED] - Define `AppState` enum or sealed class/constants ("MONITORING", "GOBBLE_TIME").
 
-- Create a `PreferencesRepository` class encapsulating DataStore read/write operations using Kotlin Flows. Implement functions for each key with defaults. Use dependency injection principles if comfortable, or simple instantiation for now.
+[COMPLETED] - Create a `PreferencesRepository` class encapsulating DataStore read/write operations using Kotlin Flows. Implement functions for each key with defaults. Use dependency injection principles if comfortable, or simple instantiation for now.
 
-- Add manual checks for DataStore read/write functionality if feasible without full UI/Service??
+[COMPLETED] - Add manual checks for DataStore read/write functionality if feasible without full UI/Service?? (Deferred to verification via logs during integration)
 
-- Commit persistence layer to Git.
+[COMPLETED] - Commit persistence layer to Git.
 
 --- Phase 2: Background Service & Health Services Integration ---
 
-- Create `HeartRateMonitorService` class extending `LifecycleService` in the `service` package.
+[COMPLETED] - Create `HeartRateMonitorService` class extending `LifecycleService` in the `service` package.
 
-- Implement basic Service lifecycle (`onCreate`, `onStartCommand`, `onDestroy`).
+[COMPLETED] - Implement basic Service lifecycle (`onCreate`, `onStartCommand`, `onDestroy`).
 
-- Implement Foreground Service requirements: notification channel (create in `onCreate`), persistent notification builder, `startForeground` call (in `onStartCommand`).
+[COMPLETED] - Implement Foreground Service requirements: notification channel (create in `onCreate`), persistent notification builder, `startForeground` call (in `onStartCommand`).
 
-- Add necessary permissions to `app/src/main/AndroidManifest.xml`: `FOREGROUND_SERVICE`, `BODY_SENSORS`, `POST_NOTIFICATIONS` (for Android 13+ alerts/foreground notification). `WAKE_LOCK` is already present from template - review if strictly needed later.
+[COMPLETED] - Add necessary permissions to `app/src/main/AndroidManifest.xml`: `FOREGROUND_SERVICE`, `BODY_SENSORS`, `POST_NOTIFICATIONS`, `FOREGROUND_SERVICE_HEALTH`. `WAKE_LOCK` is already present from template - review if strictly needed later.
 
-- Instantiate `PassiveMonitoringClient` in the Service.
+[COMPLETED] - Instantiate `PassiveMonitoringClient` in the Service.
 
-- Implement `BODY_SENSORS` permission check within Service start logic (log error & stop service if denied initially).
+[COMPLETED] - Implement `BODY_SENSORS` permission check within Service start logic (log error & stop service if denied initially).
 
-- Implement `registerPassiveListener()` function using `passiveMonitoringClient.registerPassiveListenerCallback()`. Use appropriate permissions check *before* registering.
+[COMPLETED] - Implement `registerPassiveListener()` function using `passiveMonitoringClient.setPassiveListenerCallback()`. Use appropriate permissions check *before* registering. Added suspend/await.
 
-- Implement `unregisterPassiveListener()` function using `passiveMonitoringClient.unregisterPassiveListenerCallback()`.
+[COMPLETED] - Implement `unregisterPassiveListener()` function using `passiveMonitoringClient.clearPassiveListenerCallbackAsync()`. Added suspend/await.
 
-- Implement the `PassiveListenerCallback` logic: initially log received `DataPoint<HeartRateBpm>` details.
+[COMPLETED] - Implement the `PassiveListenerCallback` logic: initially log received `PassiveMonitoringData` details.
 
-- Commit initial service and Health Services setup to Git.
+[PENDING] - Commit initial service and Health Services setup to Git. (Blocked by build errors)
+
+--- Phase 2.5: Troubleshoot Build Errors ---
+
+- **Resolve persistent build errors** in `HeartRateMonitorService.kt`.
+    - **Symptoms:** Unresolved references (`PassiveMonitoringData`, `await`), override errors (`onNewDataPoints`, `onError`), potential classpath/dependency issues (`ListenableFuture`).
+    - **Steps Taken:** Added `kotlinx-coroutines-guava` dependency, synced Gradle, multiple code refactors focusing on imports/signatures, Invalidated Caches & Restarted, Rebuilt Project.
+    - **Next Steps:** Verify Gradle dependencies meticulously, try command-line Gradle build (`./gradlew assembleDebug`), manually delete build folders (`.gradle`, `app/build`), check for conflicting transitive dependencies.
 
 --- Phase 3: Core Monitoring Logic (in Service) ---
 

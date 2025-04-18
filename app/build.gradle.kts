@@ -58,6 +58,7 @@ dependencies {
     implementation(libs.lifecycle.viewmodel.compose)
     implementation(libs.lifecycle.service)
     implementation(libs.kotlinx.coroutines.android) // Included explicitly
+    implementation(libs.kotlinx.coroutines.guava) // Added for ListenableFuture.await()
 
     androidTestImplementation(platform(libs.compose.bom))
     androidTestImplementation(libs.ui.test.junit4)
