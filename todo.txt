@@ -1,15 +1,16 @@
 Context: Combined Project Brief & Phased Plan for Wear OS Fasting Heart Rate Monitor v2. This file tracks remaining work.
 
---- BLOCKER: MainActivity Not Launching on Emulator ---
+--- BLOCKER: MainActivity Not Launching on Emulator --- [RESOLVED] ---
 
-- **Current Status:** The application compiles successfully and can be installed on a Wear OS emulator. Logcat confirms the application process starts and `MainApplication.onCreate` executes (initializing `PreferencesRepository`). However, `MainActivity.onCreate` does not appear to be called, and the application UI is never displayed; the emulator typically returns to the watch face or app list after installation/launch attempt. No fatal crash logs are observed in Logcat.
-- **Problem:** The primary user interface (`MainActivity`) is failing to launch, preventing any UI interaction or visual confirmation of the application state.
-- **Suspected Causes:**
-    1.  **`AndroidManifest.xml` Configuration Error:** Incorrect declaration of `MainActivity`, missing/incorrect `android:exported` attribute, or malformed `<intent-filter>` for the MAIN/LAUNCHER action.
+- **Resolution:** The failure was caused by an incorrect explicit call to `setTheme()` within `MainActivity.onCreate` after `super.onCreate()`, which conflicted with the theme handling provided by the `installSplashScreen()` library and the theme defined in the Manifest (`MainActivityTheme.Starting`). Removing the explicit `setTheme()` call resolved the launch failure. The placeholder UI (`WearApp`) is now displaying correctly.
+- **Previous Status:** The application compiled successfully and could be installed on a Wear OS emulator. Logcat confirmed the application process starts and `MainApplication.onCreate` executes (initializing `PreferencesRepository`). However, `MainActivity.onCreate` did not appear to be called, and the application UI was never displayed; the emulator typically returned to the watch face or app list after installation/launch attempt. No fatal crash logs were observed in Logcat.
+- **Previous Problem:** The primary user interface (`MainActivity`) was failing to launch, preventing any UI interaction or visual confirmation of the application state.
+- **Previous Suspected Causes:**
+    1.  **`AndroidManifest.xml` Configuration Error:** Incorrect declaration of `MainActivity`, missing/incorrect `android:exported` attribute, or malformed `<intent-filter>` for the MAIN/LAUNCHER action. (Checked, minor `taskAffinity` change didn't fix).
     2.  **Emulator Issue:** Potential graphics/windowing incompatibility or deeper glitch within the specific emulator instance preventing activity window creation (though less likely to fail silently).
     3.  **System Interference:** Extremely unlikely, but some system process preventing the activity launch.
-- **Next Step:** Thoroughly review the `app/src/main/AndroidManifest.xml` file, specifically the `<application>` tag and the `<activity android:name=".presentation.MainActivity">` declaration within it, including its attributes (`android:exported`) and intent filters (`<action android:name="android.intent.action.MAIN" />`, `<category android:name="android.intent.category.LAUNCHER" />`).
-- **Impact:** This blocker prevents *any* UI testing or interaction, halting progress on all subsequent UI integration, permission handling, and feature implementation tasks (Batches 2, 3, 4).
+    4.  **[Actual Cause] Theme/Splash Screen Conflict:** Incorrect theme application in `MainActivity.onCreate`.
+- **Impact:** This blocker previously prevented *any* UI testing or interaction, halting progress on all subsequent UI integration, permission handling, and feature implementation tasks (Batches 2, 3, 4). **This is now unblocked.**
 
 --- Project Brief & Specifications ---
 
@@ -66,24 +67,24 @@ Key Design Decisions & Logic Details:
  [COMPLETED] - Define `MainViewModel` responsible for holding UI state and interacting with `PreferencesRepository`.
  [COMPLETED] - Expose relevant `Flows` via a combined `StateFlow<MainUiState>`.
  [COMPLETED] - Implement UI state (`MainUiState` data class defined).
- [COMPLETED - Code Provided, but BLOCKED by Activity Launch Failure] - Create basic Compose UI layout in `MainActivity`.
- [BLOCKED by Activity Launch Failure] - Connect the UI elements to observe state from the `ViewModel`. (Verify state flows correctly to UI).
- [BLOCKED by Activity Launch Failure] - Implement basic navigation stub for Log screen.
- [BLOCKED by Activity Launch Failure] - Commit initial UI structure and ViewModel.
+ [COMPLETED - Blocker Resolved] - Create basic Compose UI layout in `MainActivity`. (Current placeholder UI works).
+ [UNBLOCKED] - Connect the UI elements to observe state from the `ViewModel`. (Verify state flows correctly to UI). <-- NEXT STEP
+ [UNBLOCKED] - Implement basic navigation stub for Log screen.
+ [UNBLOCKED] - Commit initial UI structure and ViewModel.
 
 --- Batch 3: Integrate UI, Service & Permissions ---
- [BLOCKED by Activity Launch Failure] - Implement "Reset" button functionality: Button -> ViewModel -> Repository -> Service Reaction.
- [BLOCKED by Activity Launch Failure] - Implement "Set Target Heart Rate" functionality: Input -> ViewModel -> Repository.
- [BLOCKED by Activity Launch Failure] - Implement UI logic to check for `BODY_SENSORS` permission on Activity launch/resume. Show message/button if denied.
- [BLOCKED by Activity Launch Failure] - Implement the "Grant Permission" button action to trigger the system permission request flow. Handle result.
- [BLOCKED by Activity Launch Failure] - Implement UI logic to check for `POST_NOTIFICATIONS` permission (Android 13+). (Placeholder check/log).
- [BLOCKED by Activity Launch Failure] - Refine UI based on state (e.g., disable "Reset" button).
- [BLOCKED by Activity Launch Failure] - Ensure `MainActivity` correctly starts the `HeartRateMonitorService`. Consider edge cases.
- [BLOCKED by Activity Launch Failure] - Commit integrated UI, service communication, and permission handling.
+ [UNBLOCKED] - Implement "Reset" button functionality: Button -> ViewModel -> Repository -> Service Reaction.
+ [UNBLOCKED] - Implement "Set Target Heart Rate" functionality: Input -> ViewModel -> Repository.
+ [UNBLOCKED] - Implement UI logic to check for `BODY_SENSORS` permission on Activity launch/resume. Show message/button if denied.
+ [UNBLOCKED] - Implement the "Grant Permission" button action to trigger the system permission request flow. Handle result.
+ [UNBLOCKED] - Implement UI logic to check for `POST_NOTIFICATIONS` permission (Android 13+). (Placeholder check/log).
+ [UNBLOCKED] - Refine UI based on state (e.g., disable "Reset" button).
+ [UNBLOCKED] - Ensure `MainActivity` correctly starts the `HeartRateMonitorService`. Consider edge cases.
+ [UNBLOCKED] - Commit integrated UI, service communication, and permission handling.
 
 --- Batch 4: Implement Alerting & Persistent Logging ---
- [BLOCKED by Activity Launch Failure] - Implement the alert mechanism when `appState` transitions to `GOBBLE_TIME` within the service. Check `POST_NOTIFICATIONS`. Create/display notification.
- [BLOCKED by Activity Launch Failure] - Implement persistent file logging: Choose strategy, create logger, add logging calls (Service, Repo, VM, UI), write to internal storage.
- [BLOCKED by Activity Launch Failure] - Implement the Log Viewer UI screen: Read logs, display in list, implement "Clear Logs".
- [BLOCKED by Activity Launch Failure] - Integrate navigation to the Log Viewer screen.
- [BLOCKED by Activity Launch Failure] - Commit alerting and persistent logging features.
+ [UNBLOCKED] - Implement the alert mechanism when `appState` transitions to `GOBBLE_TIME` within the service. Check `POST_NOTIFICATIONS`. Create/display notification.
+ [UNBLOCKED] - Implement persistent file logging: Choose strategy, create logger, add logging calls (Service, Repo, VM, UI), write to internal storage.
+ [UNBLOCKED] - Implement the Log Viewer UI screen: Read logs, display in list, implement "Clear Logs".
+ [UNBLOCKED] - Integrate navigation to the Log Viewer screen.
+ [UNBLOCKED] - Commit alerting and persistent logging features.
