@@ -37,13 +37,35 @@ App UI checks on launch/resume. If denied, displays explanation and "Grant Permi
 Service checks on start and stops itself if permission is not granted or revoked.
 In-App Logging: A dedicated UI screen will display timestamped logs read from a persistent file stored in app-internal storage. Will include key events (service state, HR processing, state changes, resets, errors). Basic log management (clear button or rotation) required.
 --- Remaining Tasks (Updated) ---
-[COMPLETED] - Implement "Reset" button functionality: Button -> ViewModel -> Repository (updateAppState, updateConsecutiveCount) -> Service Reaction.
-[BLOCKED] - Fix Stepper compilation error in TargetHeartRateDialog within MainActivity.kt. The error "None of the following functions can be called with the arguments supplied" persists despite trying explicit argument naming and ensuring type correctness (Int value, IntRange for valueRange). Requires further investigation into Stepper API usage or potential environment/dependency issues.
-[PARTIALLY BLOCKED - Logic Done, UI Blocked] - Implement "Set Target Heart Rate" functionality: Input UI -> ViewModel -> Repository (updateTargetHeartRate). (ViewModel/Repo logic complete, UI implementation blocked by Stepper issue).
-[UNBLOCKED] - Refine UI based on state (e.g., show/hide/enable/disable "Reset" button based on appState, potentially disable target setting during GOBBLE_TIME). (Partially done, can revisit after Stepper fix).
-[UNBLOCKED] - Implement basic navigation stub for Log screen & Integrate navigation to the Log Viewer screen.
-[UNBLOCKED] - Implement UI logic to check for POST_NOTIFICATIONS permission (Android 13+). (Start with placeholder check/log, then integrate with alert).
-[UNBLOCKED] - Implement the alert mechanism when appState transitions to GOBBLE_TIME within the service. Check POST_NOTIFICATIONS. Create/display notification.
-[UNBLOCKED] - Implement persistent file logging: Choose strategy, create logger class/object, add logging calls (Service, Repo, VM, UI), write to internal storage.
-[UNBLOCKED] - Implement the Log Viewer UI screen: Read logs, display in list, implement "Clear Logs".
-[UNBLOCKED] - Commit remaining features iteratively.
+
+- [COMPLETED] - Implement "Reset" button functionality: Button -> ViewModel -> Repository (updateAppState, updateConsecutiveCount) -> Service Reaction.
+
+- [BLOCKED] - Fix Stepper compilation error in TargetHeartRateDialog within MainActivity.kt.
+    - Component: `androidx.wear.compose.material.Stepper`
+    - Error: Persistently fails with "None of the following functions can be called with the arguments supplied." and/or "@Composable invocations can only happen from the context of a @Composable function" on internal elements (Icons/Text).
+    - Context: Occurs within an `Alert` dialog.
+    - Dependency State: `kotlin = "2.0.21"`, `composeBom = "2025.04.00"`, explicit `androidx.wear.compose:compose-material = "1.4.1"`, `androidx.wear.compose:compose-foundation = "1.4.1"`.
+    - Attempts Failed:
+        - Explicitly naming parameters.
+        - Matching signature to IDE tooltip variations (removing button/content lambdas, using non-composable `() -> Unit` for buttons).
+        - Isolating Stepper call outside of Dialog/Alert context (failed similarly).
+        - Using older BOM (`2023.08.00`) + older Wear Compose (`1.2.1`).
+        - Letting latest BOM manage Wear Compose versions (led to build failure: `Could not find androidx.wear.compose:compose-material:.`).
+        - Using latest BOM + latest Wear Compose (`1.4.1`).
+    - Next Steps: Requires deeper investigation - potential causes include subtle API misuse, incorrect imports despite verification, project corruption (requiring invalidating caches/restarting IDE), or a genuine library/tooling bug. Consider creating a minimal reproducible example.
+
+- [BLOCKED by Stepper] - Implement "Set Target Heart Rate" functionality: Input UI -> ViewModel -> Repository (updateTargetHeartRate). (ViewModel/Repo logic complete, UI implementation blocked by Stepper issue).
+
+- [UNBLOCKED] - Refine UI based on state (e.g., show/hide/enable/disable "Reset" button based on appState, potentially disable target setting during GOBBLE_TIME). (Partially done, can revisit after Stepper fix).
+
+- [UNBLOCKED] - Implement basic navigation stub for Log screen & Integrate navigation to the Log Viewer screen.
+
+- [UNBLOCKED] - Implement UI logic to check for POST_NOTIFICATIONS permission (Android 13+). (Start with placeholder check/log, then integrate with alert).
+
+- [UNBLOCKED] - Implement the alert mechanism when appState transitions to GOBBLE_TIME within the service. Check POST_NOTIFICATIONS. Create/display notification.
+
+- [UNBLOCKED] - Implement persistent file logging: Choose strategy, create logger class/object, add logging calls (Service, Repo, VM, UI), write to internal storage.
+
+- [UNBLOCKED] - Implement the Log Viewer UI screen: Read logs, display in list, implement "Clear Logs".
+
+- [UNBLOCKED] - Commit remaining features iteratively.
