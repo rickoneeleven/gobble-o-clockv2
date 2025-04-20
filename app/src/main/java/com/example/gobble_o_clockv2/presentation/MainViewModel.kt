@@ -9,6 +9,8 @@ import com.example.gobble_o_clockv2.MainApplication
 import com.example.gobble_o_clockv2.data.AppState
 import com.example.gobble_o_clockv2.data.PreferencesRepository
 import kotlinx.coroutines.flow.* // Import necessary Flow operators
+import kotlinx.coroutines.launch // Import launch
+import java.io.IOException
 
 /**
  * Represents the consolidated state for the main UI screen.
@@ -61,7 +63,7 @@ class MainViewModel(
     ) { appStateValue, consecutiveCountValue, lastDisplayedHrValue, targetHeartRateValue, permissionGrantedValue -> // Add parameter for permission
 
         // Log the combined values (optional, for debugging)
-        Log.d(logTag, "Combining flows: State=$appStateValue, Count=$consecutiveCountValue, HR=$lastDisplayedHrValue, Target=$targetHeartRateValue, Perm=$permissionGrantedValue")
+        // Log.d(logTag, "Combining flows: State=$appStateValue, Count=$consecutiveCountValue, HR=$lastDisplayedHrValue, Target=$targetHeartRateValue, Perm=$permissionGrantedValue")
 
         // Construct the MainUiState object using the received values
         MainUiState(
@@ -78,9 +80,37 @@ class MainViewModel(
     )
 
 
-    // --- UI Interaction Functions (To be added later) ---
-    // fun resetMonitoring() { ... }
-    // fun updateTargetHeartRate(newRate: Int) { ... }
+    // --- UI Interaction Functions ---
+
+    /**
+     * Resets the application state from GOBBLE_TIME back to MONITORING
+     * and clears the consecutive count.
+     */
+    fun resetMonitoring() {
+        Log.i(logTag, "Reset monitoring requested by UI.")
+        viewModelScope.launch {
+            try {
+                // Verify current state before resetting (optional, but good practice)
+                val currentState = preferencesRepository.appStateFlow.first()
+                if (currentState == AppState.GOBBLE_TIME) {
+                    Log.d(logTag, "Current state is GOBBLE_TIME, proceeding with reset.")
+                    preferencesRepository.updateAppState(AppState.MONITORING)
+                    preferencesRepository.updateConsecutiveCount(0)
+                    Log.i(logTag, "App state reset to MONITORING and consecutive count cleared.")
+                } else {
+                    Log.w(logTag, "Reset requested, but current state is $currentState (not GOBBLE_TIME). No action taken.")
+                }
+            } catch (e: IOException) {
+                Log.e(logTag, "IOException during resetMonitoring data store operation.", e)
+                // Consider showing error to user if critical
+            } catch (e: Exception) {
+                Log.e(logTag, "Failed to reset monitoring state.", e)
+                // Consider showing error to user if critical
+            }
+        }
+    }
+
+    // fun updateTargetHeartRate(newRate: Int) { ... } // Placeholder for next task
 
     override fun onCleared() {
         super.onCleared()
