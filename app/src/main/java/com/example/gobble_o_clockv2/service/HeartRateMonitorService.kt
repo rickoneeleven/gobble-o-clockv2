@@ -1,7 +1,7 @@
 package com.example.gobble_o_clockv2.service
 
 // Android Core Imports
-import android.Manifest
+import android.Manifest // <<< Added
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -32,6 +32,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job // Import Job
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.collect // Import collect explicitly
+import kotlinx.coroutines.flow.scan // <<< Added for tracking previous state
 import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.launch
 
@@ -49,15 +50,19 @@ class HeartRateMonitorService : LifecycleService() {
     // Use companion object for Log Tag for consistency even in instance methods
     companion object {
         private val logTag: String = HeartRateMonitorService::class.java.simpleName
-        private const val NOTIFICATION_ID = 101
-        private const val NOTIFICATION_CHANNEL_ID = "gobble_o_clock_channel_01"
-        private const val NOTIFICATION_CHANNEL_NAME = "Heart Rate Monitoring"
+        private const val FOREGROUND_NOTIFICATION_ID = 101
+        private const val GOBBLE_TIME_ALERT_NOTIFICATION_ID = 102 // <<< New ID for alert
+        private const val FOREGROUND_CHANNEL_ID = "gobble_o_clock_foreground_channel_01" // <<< Renamed for clarity
+        private const val ALERT_CHANNEL_ID = "gobble_o_clock_alert_channel_01" // <<< New Channel ID
+        private const val FOREGROUND_CHANNEL_NAME = "Heart Rate Monitoring Status" // <<< Renamed for clarity
+        private const val ALERT_CHANNEL_NAME = "Gobble Time Alerts" // <<< New Channel Name
     }
 
     // --- Dependencies ---
     private lateinit var preferencesRepository: PreferencesRepository
     private lateinit var passiveMonitoringClient: PassiveMonitoringClient
     private lateinit var heartRateProcessor: HeartRateProcessor
+    private lateinit var notificationManager: NotificationManager // <<< Added manager instance
 
     // --- State ---
     @Volatile // Ensure visibility across threads, although primary access is main/lifecycleScope
@@ -68,7 +73,8 @@ class HeartRateMonitorService : LifecycleService() {
     private val passiveListenerCallback = object : PassiveListenerCallback {
         override fun onNewDataPointsReceived(dataPoints: DataPointContainer) {
             val callbackTimeMillis = System.currentTimeMillis()
-            Log.d(logTag, "[Callback] onNewDataPointsReceived at $callbackTimeMillis. Listener registered: $isListenerRegistered")
+            // Log less verbosely here, Processor handles detailed logging
+            // Log.d(logTag, "[Callback] onNewDataPointsReceived at $callbackTimeMillis. Listener registered: $isListenerRegistered")
 
             // Ensure processor is initialized before processing
             if (!::heartRateProcessor.isInitialized) {
@@ -76,7 +82,7 @@ class HeartRateMonitorService : LifecycleService() {
                 return
             }
 
-            Log.d(logTag, "[Callback] Launching coroutine to process data points.")
+            // Log.d(logTag, "[Callback] Launching coroutine to process data points.") // Less verbose
             // Delegate processing to the dedicated processor class
             lifecycleScope.launch {
                 heartRateProcessor.processHeartRateData(dataPoints, callbackTimeMillis)
@@ -101,13 +107,14 @@ class HeartRateMonitorService : LifecycleService() {
         // --- Dependency Initialization ---
         Log.d(logTag, "[Lifecycle] Initializing dependencies...")
         try {
+            notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager // Initialize manager
             preferencesRepository = (application as MainApplication).preferencesRepository
             Log.i(logTag, "[Lifecycle] PreferencesRepository obtained successfully.")
         } catch (e: ClassCastException) {
             Log.e(logTag, "[Lifecycle] CRITICAL: Application context could not be cast to MainApplication. Stopping service.", e)
             stopSelf(); return
         } catch (e: Exception) {
-            Log.e(logTag, "[Lifecycle] CRITICAL: Failed to obtain PreferencesRepository. Stopping service.", e)
+            Log.e(logTag, "[Lifecycle] CRITICAL: Failed to obtain PreferencesRepository or NotificationManager. Stopping service.", e)
             stopSelf(); return
         }
 
@@ -127,7 +134,7 @@ class HeartRateMonitorService : LifecycleService() {
             stopSelf(); return
         }
 
-        createNotificationChannel()
+        createNotificationChannels() // Create both channels
         Log.i(logTag, "[Lifecycle] Service created and dependencies initialized.")
     }
 
@@ -139,22 +146,23 @@ class HeartRateMonitorService : LifecycleService() {
 
         // --- Pre-computation / Dependency Checks ---
         Log.d(logTag, "[Lifecycle] Checking prerequisites...")
-        if (!::preferencesRepository.isInitialized || !::heartRateProcessor.isInitialized || !::passiveMonitoringClient.isInitialized) {
+        if (!::preferencesRepository.isInitialized || !::heartRateProcessor.isInitialized || !::passiveMonitoringClient.isInitialized || !::notificationManager.isInitialized) {
             Log.e(logTag, "[Lifecycle] CRITICAL: Service started but dependencies not initialized correctly. Stopping.")
             stopSelf(); return START_NOT_STICKY // Don't restart if fundamental setup failed
         }
-        Log.d(logTag, "[Lifecycle] Dependencies confirmed (Repo, Processor, Client).")
+        Log.d(logTag, "[Lifecycle] Dependencies confirmed (Repo, Processor, Client, NotifManager).")
 
-        if (!hasBodySensorsPermission()) {
+        if (!hasPermission(Manifest.permission.BODY_SENSORS)) {
             Log.e(logTag, "[Lifecycle] CRITICAL: BODY_SENSORS permission not granted at start. Stopping service.")
             stopSelf(); return START_NOT_STICKY // Don't restart if permissions are missing
         }
         Log.d(logTag, "[Lifecycle] BODY_SENSORS permission confirmed.")
+        // Note: We don't stop if POST_NOTIFICATIONS isn't granted, alerts will just fail silently.
 
 
         Log.i(logTag, "[Lifecycle] Starting foreground service...")
         try {
-            startForeground(NOTIFICATION_ID, createNotification())
+            startForeground(FOREGROUND_NOTIFICATION_ID, createForegroundNotification())
             Log.i(logTag, "[Lifecycle] Foreground service started successfully.")
         } catch (e: Exception) {
             Log.e(logTag, "[Lifecycle] CRITICAL: Failed to start foreground service. Stopping.", e)
@@ -162,7 +170,6 @@ class HeartRateMonitorService : LifecycleService() {
         }
 
         // --- Initial State Handling and Continuous Observation ---
-        // Only start the observer if it's not already running
         if (stateObserverJob == null || !stateObserverJob!!.isActive) {
             Log.i(logTag, "[Observer] State observer job not active. Launching initial state check and continuous observer.")
             stateObserverJob = lifecycleScope.launch {
@@ -170,15 +177,11 @@ class HeartRateMonitorService : LifecycleService() {
             }
         } else {
             Log.i(logTag, "[Observer] State observer job already active. Skipping launch.")
-            // If the service is restarted (e.g., START_STICKY), we might still need
-            // to ensure the listener state matches the persisted AppState.
-            // Trigger a check without restarting the whole collector.
             lifecycleScope.launch {
                 checkAndAlignListenerState()
             }
         }
 
-        // Use START_STICKY to request the system restart the service if it's killed
         Log.i(logTag,"[Lifecycle] onStartCommand returning START_STICKY")
         return START_STICKY
     }
@@ -191,33 +194,52 @@ class HeartRateMonitorService : LifecycleService() {
         // --- Continuous State Observation ---
         Log.i(logTag, "[Observer] Coroutine: Starting continuous observer for appStateFlow changes.")
         try {
-            // Collect emits values indefinitely until the scope is cancelled
-            preferencesRepository.appStateFlow.collect { state ->
-                Log.i(logTag, "[Observer] Coroutine: Observed AppState change: $state. Current listener state: $isListenerRegistered")
-                when (state) {
-                    AppState.MONITORING -> {
-                        if (!isListenerRegistered) {
-                            Log.i(logTag, "[Observer] State is MONITORING, listener not registered. Attempting registration.")
-                            registerPassiveListener() // Checks permission internally
-                        } else {
-                            Log.d(logTag, "[Observer] State is MONITORING, listener already registered. No action needed.")
-                        }
+            // Use scan to keep track of the previous state along with the current state
+            preferencesRepository.appStateFlow
+                .scan(null as Pair<AppState?, AppState>?) { previousPair, currentState ->
+                    // The first emission will have null as previousPair
+                    val previousState = previousPair?.second
+                    Pair(previousState, currentState)
+                }
+                .collect { statePair ->
+                    if (statePair == null) return@collect // Skip initial null from scan
+
+                    val previousState = statePair.first
+                    val currentState = statePair.second
+
+                    Log.i(logTag, "[Observer] Coroutine: Observed AppState change: Prev=$previousState, Curr=$currentState. Listener registered: $isListenerRegistered")
+
+                    // --- State Transition Logic ---
+                    if (previousState == AppState.MONITORING && currentState == AppState.GOBBLE_TIME) {
+                        Log.w(logTag, "[Observer] !!! GOBBLE TIME DETECTED (Transition from MONITORING) !!!")
+                        showGobbleTimeAlertNotification() // Trigger the alert notification
+                        // Unregister listener will happen based on current state check below
                     }
-                    AppState.GOBBLE_TIME -> {
-                        if (isListenerRegistered) {
-                            Log.i(logTag, "[Observer] State is GOBBLE_TIME, listener registered. Attempting unregistration.")
-                            safelyUnregisterListener()
-                        } else {
-                            Log.d(logTag, "[Observer] State is GOBBLE_TIME, listener already unregistered. No action needed.")
+
+                    // --- Listener Alignment Logic ---
+                    when (currentState) {
+                        AppState.MONITORING -> {
+                            if (!isListenerRegistered) {
+                                Log.i(logTag, "[Observer] State is MONITORING, listener not registered. Attempting registration.")
+                                registerPassiveListener() // Checks permission internally
+                            } else {
+                                Log.d(logTag, "[Observer] State is MONITORING, listener already registered. No action needed.")
+                            }
+                        }
+                        AppState.GOBBLE_TIME -> {
+                            if (isListenerRegistered) {
+                                Log.i(logTag, "[Observer] State is GOBBLE_TIME, listener registered. Attempting unregistration.")
+                                safelyUnregisterListener()
+                            } else {
+                                Log.d(logTag, "[Observer] State is GOBBLE_TIME, listener already unregistered. No action needed.")
+                            }
                         }
                     }
                 }
-            }
         } catch (e: CancellationException) {
             Log.i(logTag, "[Observer] Coroutine: appStateFlow collection cancelled (likely service stopping or job cancellation).")
         } catch (e: Exception) {
             Log.e(logTag, "[Observer] Coroutine: Error collecting appStateFlow. Service may not react to external state changes.", e)
-            // Log the error, but allow the service to potentially continue other operations.
         } finally {
             Log.i(logTag, "[Observer] Coroutine: Exiting appStateFlow collection block.")
         }
@@ -230,7 +252,6 @@ class HeartRateMonitorService : LifecycleService() {
             preferencesRepository.appStateFlow.first() // Read current state
         } catch (e: Exception) {
             Log.e(logTag, "[AlignState] Failed to read app state during alignment check.", e)
-            // Decide if we should stop the service here or rely on subsequent checks
             Log.w(logTag,"[AlignState] Cannot determine state, potentially leaving listener misaligned.")
             return
         }
@@ -250,16 +271,19 @@ class HeartRateMonitorService : LifecycleService() {
 
     override fun onDestroy() {
         Log.i(logTag, "[Lifecycle] onDestroy - Service destroying...")
-        // Cancel the observer job explicitly to prevent leaks and stop collection
         stateObserverJob?.cancel(CancellationException("Service is being destroyed"))
         Log.d(logTag, "[Lifecycle] State observer job cancellation requested.")
 
-        // Attempt cleanup: unregister listener
-        // Using a new coroutine scope as the service scope might be cancelling
-        // Although lifecycleScope is tied to the service lifecycle, launching here is explicit
         lifecycleScope.launch {
             Log.d(logTag, "[Lifecycle] Attempting final listener unregistration in onDestroy.")
             safelyUnregisterListener()
+            // Dismiss any lingering Gobble Time alert notification
+            try {
+                notificationManager.cancel(GOBBLE_TIME_ALERT_NOTIFICATION_ID)
+                Log.d(logTag, "[Lifecycle] Cancelled Gobble Time alert notification (if present).")
+            } catch (e: Exception) {
+                Log.w(logTag, "[Lifecycle] Failed to cancel Gobble Time alert notification during destroy.", e)
+            }
         }
 
         super.onDestroy() // Call super.onDestroy() last
@@ -273,12 +297,12 @@ class HeartRateMonitorService : LifecycleService() {
     }
 
     // --- Permission Handling ---
-    private fun hasBodySensorsPermission(): Boolean {
-        val permission = Manifest.permission.BODY_SENSORS
+    private fun hasPermission(permission: String): Boolean { // <<< Generic permission check
         val granted = ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
-        Log.d(logTag, "[Permission] Checking BODY_SENSORS: Granted = $granted")
+        // Log less verbosely inside this helper
+        // Log.d(logTag, "[Permission] Checking $permission: Granted = $granted")
         if (!granted) {
-            Log.w(logTag, "[Permission] BODY_SENSORS permission check returned false.")
+            Log.w(logTag, "[Permission] Permission check returned false for: $permission")
         }
         return granted
     }
@@ -289,7 +313,7 @@ class HeartRateMonitorService : LifecycleService() {
         Log.d(logTag, "[ListenerMgmt] Current state before registration attempt: isListenerRegistered=$isListenerRegistered")
 
         // Gate 1: Permission Check
-        if (!hasBodySensorsPermission()) {
+        if (!hasPermission(Manifest.permission.BODY_SENSORS)) {
             Log.w(logTag, "[ListenerMgmt] Registration SKIPPED: BODY_SENSORS permission not granted. Stopping service.")
             stopSelf(); return
         }
@@ -303,13 +327,12 @@ class HeartRateMonitorService : LifecycleService() {
             Log.e(logTag, "[ListenerMgmt] Registration FAILED: PassiveMonitoringClient not initialized. Stopping service.")
             stopSelf(); return
         }
-        // Gate 4: AppState Check (Safety check - read state *just before* registering)
+        // Gate 4: AppState Check
         val currentState = try { preferencesRepository.appStateFlow.first() } catch (e: Exception) {
             Log.e(logTag, "[ListenerMgmt] Registration FAILED: Could not read app state immediately before registering.", e); return
         }
         if (currentState != AppState.MONITORING) {
             Log.w(logTag, "[ListenerMgmt] Registration ABORTED: AppState changed to $currentState just before registration call.")
-            // If state flipped back to GOBBLE_TIME, ensure listener is *not* registered (double check)
             if (isListenerRegistered) safelyUnregisterListener()
             return
         }
@@ -321,17 +344,15 @@ class HeartRateMonitorService : LifecycleService() {
 
         try {
             passiveMonitoringClient.setPassiveListenerCallback(passiveListenerConfig, passiveListenerCallback)
-            // IMPORTANT: Update state ONLY on success
             isListenerRegistered = true
             Log.i(logTag, "[ListenerMgmt] Passive listener registration SUCCESSFUL. isListenerRegistered set to true.")
         } catch (e: SecurityException) {
             Log.e(logTag, "[ListenerMgmt] Registration FAILED: SecurityException (Permissions revoked?). Setting flag false and stopping service.", e)
-            isListenerRegistered = false // Ensure flag is false on failure
+            isListenerRegistered = false
             stopSelf()
         } catch (e: Exception) {
             Log.e(logTag, "[ListenerMgmt] Registration FAILED: General exception. Setting flag false.", e)
-            isListenerRegistered = false // Ensure flag is false on failure
-            // Consider if we should stopSelf() here too, depending on the exception type
+            isListenerRegistered = false
         }
     }
 
@@ -339,94 +360,150 @@ class HeartRateMonitorService : LifecycleService() {
         Log.i(logTag, "[ListenerMgmt] Attempting to unregister passive listener...")
         Log.d(logTag, "[ListenerMgmt] Current state before unregistration attempt: isListenerRegistered=$isListenerRegistered")
 
-        // Gate 1: Already Unregistered Check
         if (!isListenerRegistered) {
             Log.d(logTag, "[ListenerMgmt] Unregistration SKIPPED: Listener not currently reported as registered.")
             return
         }
-        // Gate 2: Client Initialization Check
         if (!::passiveMonitoringClient.isInitialized) {
             Log.w(logTag, "[ListenerMgmt] Unregistration WARNING: Client not initialized. Cannot actively unregister, but setting flag false.")
-            isListenerRegistered = false // Set flag false even if we can't call API
+            isListenerRegistered = false
             return
         }
 
         Log.d(logTag, "[ListenerMgmt] Prerequisites met. Submitting unregistration request...")
         try {
             passiveMonitoringClient.clearPassiveListenerCallbackAsync().await()
-            // IMPORTANT: Update state ONLY on success
             isListenerRegistered = false
             Log.i(logTag, "[ListenerMgmt] Passive listener unregistration SUCCESSFUL. isListenerRegistered set to false.")
         } catch (e: CancellationException) {
             Log.i(logTag, "[ListenerMgmt] Unregistration task cancelled (coroutine scope likely ending). Setting flag false.", e)
-            isListenerRegistered = false // Set flag false as the operation was interrupted
+            isListenerRegistered = false
         } catch (e: Exception) {
-            // If unregistration fails, the listener might *still* be active.
-            // Should we keep isListenerRegistered = true? This is safer but might lead to retry loops.
-            // Setting it to false might be optimistic but prevents loops if the API call fails temporarily.
-            // Let's log aggressively and set to false for now to avoid potential loops on transient errors.
             Log.e(logTag, "[ListenerMgmt] Unregistration FAILED with exception. Setting flag to false optimistically.", e)
             isListenerRegistered = false
         }
     }
 
     // --- Notification Management ---
-    private fun createNotificationChannel() {
-        Log.d(logTag, "[Notification] Attempting to create/verify notification channel...")
+    private fun createNotificationChannels() {
+        Log.d(logTag, "[Notification] Attempting to create/verify notification channels...")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                NOTIFICATION_CHANNEL_ID,
-                NOTIFICATION_CHANNEL_NAME,
-                NotificationManager.IMPORTANCE_LOW // Low importance to be less intrusive
+            // Foreground Service Channel (Low Importance)
+            val foregroundChannel = NotificationChannel(
+                FOREGROUND_CHANNEL_ID,
+                FOREGROUND_CHANNEL_NAME,
+                NotificationManager.IMPORTANCE_LOW // Low importance for ongoing status
             ).apply {
-                description = "Provides status updates for background heart rate monitoring."
+                description = "Displays the ongoing status of heart rate monitoring."
                 setShowBadge(false)
-                lockscreenVisibility = Notification.VISIBILITY_PRIVATE // Hide details on lock screen
+                lockscreenVisibility = Notification.VISIBILITY_PRIVATE
             }
-            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+            // Alert Channel (High Importance)
+            val alertChannel = NotificationChannel(
+                ALERT_CHANNEL_ID,
+                ALERT_CHANNEL_NAME,
+                NotificationManager.IMPORTANCE_HIGH // High importance for alerts
+            ).apply {
+                description = "Alerts when the Gobble Time condition is met."
+                setShowBadge(true) // Maybe show a badge for alerts
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC // Show alert on lock screen
+                // Enable vibration and lights (using defaults)
+                enableVibration(true)
+                enableLights(true)
+                // Sound is default, can customize with setSound()
+            }
+
             try {
-                notificationManager.createNotificationChannel(channel)
-                Log.i(logTag, "[Notification] Notification channel '$NOTIFICATION_CHANNEL_ID' created or verified.")
+                notificationManager.createNotificationChannel(foregroundChannel)
+                Log.i(logTag, "[Notification] Foreground channel '$FOREGROUND_CHANNEL_ID' created or verified.")
+                notificationManager.createNotificationChannel(alertChannel)
+                Log.i(logTag, "[Notification] Alert channel '$ALERT_CHANNEL_ID' created or verified.")
             } catch (e: Exception) {
-                Log.e(logTag, "[Notification] Failed to create notification channel '$NOTIFICATION_CHANNEL_ID'.", e)
+                Log.e(logTag, "[Notification] Failed to create one or more notification channels.", e)
             }
         } else {
             Log.d(logTag, "[Notification] Notification channel creation skipped (SDK < 26).")
         }
     }
 
-    private fun createNotification(): Notification {
+    private fun createForegroundNotification(): Notification {
         Log.d(logTag, "[Notification] Creating foreground service notification...")
         val launchActivityIntent = Intent(this, MainActivity::class.java).apply {
-            // Flags to bring existing task to foreground or start new one
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
         }
+        val activityPendingIntent = createPendingIntent(launchActivityIntent, 0)
 
-        val pendingIntentFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        } else {
-            PendingIntent.FLAG_UPDATE_CURRENT // Mutable is implicitly allowed pre-M
-        }
-
-        val activityPendingIntent: PendingIntent = PendingIntent.getActivity(
-            this,
-            0, // Request code
-            launchActivityIntent,
-            pendingIntentFlags
-        )
-
-        val notificationBuilder = NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
+        val notificationBuilder = NotificationCompat.Builder(this, FOREGROUND_CHANNEL_ID)
             .setContentTitle(getString(R.string.app_name))
-            .setContentText("Monitoring heart rate...") // TODO: Could dynamically update this based on state later
+            .setContentText("Monitoring heart rate...")
             .setSmallIcon(R.mipmap.ic_launcher) // Ensure this icon exists
-            .setOngoing(true) // Makes it non-dismissible
-            .setSilent(true) // No sound on initial display or updates
+            .setOngoing(true)
+            .setSilent(true) // No sound for foreground status
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE) // Content hidden on secure lock screen
-            .setContentIntent(activityPendingIntent) // Action when tapped
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setContentIntent(activityPendingIntent)
 
         val notification = notificationBuilder.build()
         Log.d(logTag, "[Notification] Foreground service notification constructed.")
         return notification
+    }
+
+    private fun showGobbleTimeAlertNotification() {
+        Log.i(logTag, "[Notification] Attempting to show Gobble Time alert notification.")
+
+        // --- Permission Check ---
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) { // Check only on Android 13+
+            if (!hasPermission(Manifest.permission.POST_NOTIFICATIONS)) {
+                Log.w(logTag, "[Notification] Gobble Time alert SKIPPED: POST_NOTIFICATIONS permission not granted.")
+                // TODO: Consider alternative feedback? Maybe log to DataStore? For now, just log warning.
+                return
+            }
+            Log.d(logTag, "[Notification] POST_NOTIFICATIONS permission confirmed (or not required).")
+        }
+
+        // --- Build Notification ---
+        val launchActivityIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            // Optional: Add extra data to indicate it came from the alert
+            putExtra("source", "gobble_time_alert")
+        }
+        val activityPendingIntent = createPendingIntent(launchActivityIntent, 1) // Use different request code
+
+
+        val notificationBuilder = NotificationCompat.Builder(this, ALERT_CHANNEL_ID) // Use ALERT channel
+            .setContentTitle("Gobble Time!") // Clearer Title
+            .setContentText("Heart rate threshold met. Monitoring paused.")
+            .setSmallIcon(R.mipmap.ic_launcher) // Use app icon, could be different
+            .setPriority(NotificationCompat.PRIORITY_HIGH) // Ensure high priority
+            .setCategory(NotificationCompat.CATEGORY_ALARM) // Use ALARM category for high visibility
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC) // Show content on lock screen
+            .setContentIntent(activityPendingIntent)
+            .setAutoCancel(true) // Dismiss notification when tapped
+        // Vibration/Sound/Lights are handled by the channel settings on O+
+
+        // --- Display Notification ---
+        try {
+            if (!::notificationManager.isInitialized) {
+                Log.e(logTag, "[Notification] Cannot show Gobble Time alert: NotificationManager not initialized.")
+                return
+            }
+            notificationManager.notify(GOBBLE_TIME_ALERT_NOTIFICATION_ID, notificationBuilder.build())
+            Log.i(logTag, "[Notification] Gobble Time alert notification successfully posted.")
+        } catch (e: SecurityException) {
+            Log.e(logTag, "[Notification] Failed to show Gobble Time alert due to SecurityException (permissions?).", e)
+        } catch (e: Exception) {
+            Log.e(logTag, "[Notification] Failed to show Gobble Time alert notification.", e)
+        }
+    }
+
+    // Helper to create PendingIntents consistently
+    private fun createPendingIntent(intent: Intent, requestCode: Int): PendingIntent {
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        } else {
+            PendingIntent.FLAG_UPDATE_CURRENT // Mutable is implicitly allowed pre-M
+        }
+        return PendingIntent.getActivity(this, requestCode, intent, flags)
     }
 }

@@ -20,7 +20,8 @@ data class MainUiState(
     val consecutiveCount: Int = 0,
     val lastDisplayedHr: Int = 0,
     val targetHeartRate: Int = 70,
-    val isPermissionGranted: Boolean = false // Now reflects actual checked status
+    val isBodySensorsPermissionGranted: Boolean = false,
+    val isNotificationsPermissionGranted: Boolean = false
 )
 
 /**
@@ -32,8 +33,9 @@ class MainViewModel(
 
     private val logTag: String = "MainViewModel"
 
-    // Internal state flow to hold the current permission status
-    private val _permissionGranted = MutableStateFlow(false)
+    // Internal state flows for permission status
+    private val _bodySensorsPermissionGranted = MutableStateFlow(false)
+    private val _notificationsPermissionGranted = MutableStateFlow(false)
 
     init {
         Log.i(logTag, "MainViewModel initializing.")
@@ -42,32 +44,58 @@ class MainViewModel(
     /**
      * Updates the internal state reflecting the BODY_SENSORS permission status.
      */
-    fun updatePermissionStatus(isGranted: Boolean) {
-        if (_permissionGranted.value != isGranted) { // Only update if changed
-            Log.d(logTag, "Updating permission status to: $isGranted")
-            _permissionGranted.value = isGranted
+    fun updateBodySensorsPermissionStatus(isGranted: Boolean) {
+        if (_bodySensorsPermissionGranted.value != isGranted) {
+            Log.d(logTag, "Updating BODY_SENSORS permission status to: $isGranted")
+            _bodySensorsPermissionGranted.value = isGranted
         }
     }
 
-    // Combine repository flows AND the internal permission state flow
+    /**
+     * Updates the internal state reflecting the POST_NOTIFICATIONS permission status.
+     */
+    fun updateNotificationsPermissionStatus(isGranted: Boolean) {
+        if (_notificationsPermissionGranted.value != isGranted) {
+            Log.d(logTag, "Updating POST_NOTIFICATIONS permission status to: $isGranted")
+            _notificationsPermissionGranted.value = isGranted
+        }
+    }
+
+    // Combine repository flows AND BOTH permission state flows
     val uiState: StateFlow<MainUiState> = combine(
+        // Provide the flows as arguments
         preferencesRepository.appStateFlow,
         preferencesRepository.consecutiveCountFlow,
         preferencesRepository.lastDisplayedHrFlow,
         preferencesRepository.targetHeartRateFlow,
-        _permissionGranted
-    ) { appStateValue, consecutiveCountValue, lastDisplayedHrValue, targetHeartRateValue, permissionGrantedValue ->
+        _bodySensorsPermissionGranted,
+        _notificationsPermissionGranted
+    ) { values: Array<*> -> // Lambda now accepts a single Array parameter
+
+        // --- Destructure and cast values from the array ---
+        // Order MUST match the order of flows passed to combine above
+        val appStateValue = values[0] as AppState       // Cast element 0 to AppState
+        val consecutiveCountValue = values[1] as Int    // Cast element 1 to Int
+        val lastDisplayedHrValue = values[2] as Int     // Cast element 2 to Int
+        val targetHeartRateValue = values[3] as Int     // Cast element 3 to Int
+        val sensorsGrantedValue = values[4] as Boolean  // Cast element 4 to Boolean
+        val notificationsGrantedValue = values[5] as Boolean // Cast element 5 to Boolean
+        // --- End of destructuring ---
+
+        // Now construct the MainUiState using the destructured values
         MainUiState(
             appState = appStateValue,
             consecutiveCount = consecutiveCountValue,
             lastDisplayedHr = lastDisplayedHrValue,
             targetHeartRate = targetHeartRateValue,
-            isPermissionGranted = permissionGrantedValue
+            isBodySensorsPermissionGranted = sensorsGrantedValue,
+            isNotificationsPermissionGranted = notificationsGrantedValue
         )
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
-        initialValue = MainUiState()
+        // Initial state assumes permissions are not granted until checked
+        initialValue = MainUiState(isBodySensorsPermissionGranted = false, isNotificationsPermissionGranted = false)
     )
 
 
@@ -75,15 +103,22 @@ class MainViewModel(
 
     /**
      * Resets the application state from GOBBLE_TIME back to MONITORING
-     * and clears the consecutive count.
+     * and clears the consecutive count. Requires Body Sensors permission.
      */
     fun resetMonitoring() {
         Log.i(logTag, "Reset monitoring requested by UI.")
         viewModelScope.launch {
             try {
+                // Guard: Only allow reset if Body Sensors permission is granted
+                if (!_bodySensorsPermissionGranted.value) {
+                    Log.w(logTag, "Reset monitoring blocked: Body Sensors permission is not granted.")
+                    return@launch
+                }
+
                 val currentState = preferencesRepository.appStateFlow.first()
                 if (currentState == AppState.GOBBLE_TIME) {
                     Log.d(logTag, "Current state is GOBBLE_TIME, proceeding with reset.")
+                    // Update state first, then count. Processor handles timestamps.
                     preferencesRepository.updateAppState(AppState.MONITORING)
                     preferencesRepository.updateConsecutiveCount(0)
                     Log.i(logTag, "App state reset to MONITORING and consecutive count cleared.")
@@ -100,14 +135,15 @@ class MainViewModel(
 
     /**
      * Updates the target heart rate preference.
-     * Performs basic validation (e.g., positive value).
+     * Performs basic validation.
      */
     fun updateTargetHeartRate(newRate: Int) {
         Log.i(logTag, "Update target heart rate requested by UI: $newRate")
-        // Basic validation: Ensure rate is somewhat reasonable (e.g., > 30)
-        if (newRate < 30 || newRate > 200) { // Example range
-            Log.w(logTag, "Invalid target heart rate proposed: $newRate. Update rejected.")
-            // TODO: Provide feedback to the user? (e.g., via a temporary state or event)
+        val minTargetHr = 30
+        val maxTargetHr = 200
+        if (newRate < minTargetHr || newRate > maxTargetHr) {
+            Log.w(logTag, "Invalid target heart rate proposed: $newRate (Range: $minTargetHr-$maxTargetHr). Update rejected.")
+            // TODO: Provide feedback to the user?
             return
         }
         viewModelScope.launch {
@@ -140,7 +176,7 @@ class MainViewModel(
                     val mainApplication = application as? MainApplication
                         ?: throw IllegalStateException("Application instance must be MainApplication for Factory")
                     val preferencesRepository = mainApplication.preferencesRepository
-                    Log.d("MainViewModelFactory", "Creating MainViewModel instance.")
+                    // Log.d("MainViewModelFactory", "Creating MainViewModel instance.") // Less verbose
                     return MainViewModel(preferencesRepository) as T
                 }
                 throw IllegalArgumentException("Unknown ViewModel class requested: ${modelClass.name}")
