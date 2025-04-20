@@ -9,6 +9,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build // Import Build explicitly
 import android.os.IBinder
 import android.util.Log
 
@@ -35,6 +36,7 @@ import kotlinx.coroutines.guava.await // Still needed for clearPassiveListenerCa
 import kotlinx.coroutines.launch
 
 // App Specific Imports
+import com.example.gobble_o_clockv2.MainApplication // Import MainApplication
 import com.example.gobble_o_clockv2.R
 import com.example.gobble_o_clockv2.data.AppState
 import com.example.gobble_o_clockv2.data.PreferencesRepository
@@ -48,16 +50,15 @@ class HeartRateMonitorService : LifecycleService() {
     private lateinit var passiveMonitoringClient: PassiveMonitoringClient
     private var isListenerRegistered = false
 
-    // Dependency: Must be injected/provided externally
-    lateinit var preferencesRepository: PreferencesRepository
-        private set
+    // Reference to the singleton PreferencesRepository from MainApplication
+    private lateinit var preferencesRepository: PreferencesRepository
 
     // --- Constants ---
     companion object {
         private const val NOTIFICATION_ID = 101
         private const val NOTIFICATION_CHANNEL_ID = "gobble_o_clock_channel_01"
         private const val NOTIFICATION_CHANNEL_NAME = "Heart Rate Monitoring"
-        private const val TIME_GATE_MILLISECONDS = 55000L // Approx 1 minute (55 seconds)
+        private const val TIME_GATE_MILLISECONDS = 55000L // Approx 55 seconds gate
         private const val CONSECUTIVE_COUNT_THRESHOLD = 5
     }
 
@@ -67,6 +68,11 @@ class HeartRateMonitorService : LifecycleService() {
             val callbackTimeMillis = System.currentTimeMillis()
             Log.d(logTag, "Callback: Received DataPointContainer at $callbackTimeMillis")
             lifecycleScope.launch {
+                // Ensure repository is initialized before processing
+                if (!::preferencesRepository.isInitialized) {
+                    Log.e(logTag, "CRITICAL: PreferencesRepository accessed before initialization in callback. Aborting.")
+                    return@launch
+                }
                 processDataPoints(dataPoints, callbackTimeMillis)
             }
         }
@@ -84,62 +90,89 @@ class HeartRateMonitorService : LifecycleService() {
     override fun onCreate() {
         super.onCreate()
         Log.i(logTag, "Creating service...")
+
+        // --- Dependency Initialization ---
+        // Get the singleton instance from MainApplication
+        try {
+            preferencesRepository = (application as MainApplication).preferencesRepository
+            Log.i(logTag, "PreferencesRepository obtained from MainApplication.")
+        } catch (e: ClassCastException) {
+            Log.e(logTag, "CRITICAL: Application context could not be cast to MainApplication. Check AndroidManifest.xml. Stopping service.", e)
+            stopSelf()
+            return
+        } catch (e: Exception) {
+            Log.e(logTag, "CRITICAL: Failed to obtain PreferencesRepository. Stopping service.", e)
+            stopSelf()
+            return
+        }
+        // --- End Dependency Initialization ---
+
+
         try {
             passiveMonitoringClient = HealthServices.getClient(this).passiveMonitoringClient
             Log.i(logTag, "PassiveMonitoringClient initialized.")
         } catch (e: Exception) {
-            Log.e(logTag, "Error initializing PassiveMonitoringClient during onCreate", e)
+            Log.e(logTag, "Fatal: Error initializing PassiveMonitoringClient during onCreate. Stopping service.", e)
+            // Ensure dependencies are cleaned up if initialization fails partially
             stopSelf()
             return
         }
+
         createNotificationChannel()
-        Log.i(logTag, "Service created.")
+        Log.i(logTag, "Service created and dependencies initialized.")
     }
+
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
         val action = intent?.action ?: "UNKNOWN_ACTION"
         Log.i(logTag, "Service starting command. Action: $action, StartId: $startId")
 
+        // --- Pre-computation / Dependency Checks ---
+        // preferencesRepository should be initialized in onCreate now
         if (!::preferencesRepository.isInitialized) {
-            Log.e(logTag, "CRITICAL: PreferencesRepository not provided. Stopping service.")
+            Log.e(logTag, "CRITICAL: PreferencesRepository not initialized by onStartCommand. Service likely failed onCreate. Stopping.")
             stopSelf()
             return START_NOT_STICKY
         }
-        Log.d(logTag, "PreferencesRepository dependency confirmed.")
+        Log.d(logTag, "PreferencesRepository dependency confirmed (from Application).")
 
         if (!hasBodySensorsPermission()) {
-            Log.e(logTag, "Cannot start: BODY_SENSORS permission not granted. Stopping service.")
+            Log.e(logTag, "CRITICAL: BODY_SENSORS permission not granted. Stopping service.")
             stopSelf()
             return START_NOT_STICKY
         }
         Log.d(logTag, "BODY_SENSORS permission confirmed.")
 
         if (!::passiveMonitoringClient.isInitialized) {
-            Log.e(logTag, "Cannot start: PassiveMonitoringClient not initialized. Stopping.")
+            Log.e(logTag, "CRITICAL: PassiveMonitoringClient not initialized. Stopping service.")
             stopSelf()
             return START_NOT_STICKY
         }
+        Log.d(logTag, "PassiveMonitoringClient confirmed.")
 
-        Log.i(logTag, "Starting foreground service and attempting listener registration.")
+
+        Log.i(logTag, "Starting foreground service and preparing listener registration.")
         startForeground(NOTIFICATION_ID, createNotification())
 
         lifecycleScope.launch {
             val currentState = try {
                 preferencesRepository.appStateFlow.first()
             } catch (e: Exception) {
-                Log.e(logTag, "Failed to read app state before starting service command processing", e)
+                Log.e(logTag, "Failed to read app state before starting service command processing. Stopping.", e)
                 stopSelf()
                 return@launch
             }
 
             if (currentState == AppState.MONITORING) {
+                Log.i(logTag, "Current state is MONITORING. Attempting listener registration.")
                 registerPassiveListener()
             } else {
-                Log.i(logTag, "Service started in GOBBLE_TIME state. Listener not registered.")
+                Log.i(logTag, "Service started but state is $currentState. Listener not registered.")
+                safelyUnregisterListener()
             }
 
-            // TODO: Implement continuous observation of appStateFlow for external resets
+            // TODO: Implement continuous observation of appStateFlow (Next Step)
         }
 
         return START_STICKY
@@ -174,6 +207,7 @@ class HeartRateMonitorService : LifecycleService() {
     private suspend fun processDataPoints(container: DataPointContainer, callbackTimeMillis: Long) {
         val hrDataPoints: List<DataPoint<Double>> = container.getData(DataType.HEART_RATE_BPM)
         if (hrDataPoints.isEmpty()) {
+            Log.d(logTag, "No HEART_RATE_BPM data points in this container.")
             return
         }
 
@@ -190,6 +224,7 @@ class HeartRateMonitorService : LifecycleService() {
         val hrIntValue: Int = hrValue.toInt()
 
         try {
+            // Access preferencesRepository directly (it's initialized in onCreate)
             val targetHeartRate = preferencesRepository.targetHeartRateFlow.first()
             val lastProcessedTimestamp = preferencesRepository.lastProcessedTimestampFlow.first()
             var consecutiveCount = preferencesRepository.consecutiveCountFlow.first()
@@ -201,11 +236,11 @@ class HeartRateMonitorService : LifecycleService() {
             }
 
             if (callbackTimeMillis >= lastProcessedTimestamp + TIME_GATE_MILLISECONDS) {
-                Log.i(logTag, "Time gate passed. Processing HR: $hrIntValue (Target: $targetHeartRate)")
+                Log.i(logTag, "Time gate passed (Callback Time: $callbackTimeMillis >= Last Processed: $lastProcessedTimestamp + Gate: $TIME_GATE_MILLISECONDS). Processing HR: $hrIntValue (Target: $targetHeartRate)")
 
                 if (hrIntValue <= targetHeartRate) {
                     consecutiveCount++
-                    Log.i(logTag, "HR below/equal target. Consecutive count incremented to: $consecutiveCount")
+                    Log.i(logTag, "HR below/equal target ($hrIntValue <= $targetHeartRate). Consecutive count incremented to: $consecutiveCount")
                 } else {
                     if (consecutiveCount > 0) {
                         Log.i(logTag, "HR above target ($hrIntValue > $targetHeartRate). Resetting consecutive count from $consecutiveCount to 0.")
@@ -224,16 +259,18 @@ class HeartRateMonitorService : LifecycleService() {
                     preferencesRepository.updateAppState(AppState.GOBBLE_TIME)
                     // TODO: Trigger alert/notification (Batch 4 task)
                     safelyUnregisterListener()
+                    Log.i(logTag, "Listener unregistered due to reaching GOBBLE_TIME state.")
                 }
 
             } else {
-                Log.d(logTag, "Skipping HR processing (HR: $hrIntValue): Time gate not passed. (CallbackTime: $callbackTimeMillis, LastProcessed: $lastProcessedTimestamp)")
+                Log.d(logTag, "Skipping HR processing (HR: $hrIntValue): Time gate NOT passed. (Callback Time: $callbackTimeMillis, Last Processed: $lastProcessedTimestamp, Gate: $TIME_GATE_MILLISECONDS)")
             }
 
         } catch (e: Exception) {
             Log.e(logTag, "Error during core HR processing logic", e)
         }
     }
+
 
     // --- Health Services Listener Management ---
     private suspend fun registerPassiveListener() {
@@ -251,10 +288,11 @@ class HeartRateMonitorService : LifecycleService() {
             return
         }
 
+        // Access preferencesRepository directly
         val currentState = try {
             preferencesRepository.appStateFlow.first()
         } catch (e: Exception) {
-            Log.e(logTag, "Failed to read app state before registering listener", e)
+            Log.e(logTag, "Failed to read app state immediately before registering listener", e)
             return
         }
 
@@ -269,16 +307,9 @@ class HeartRateMonitorService : LifecycleService() {
             .build()
 
         try {
-            // Corrected logic: Directly call the method, no await, no future variable.
             passiveMonitoringClient.setPassiveListenerCallback(passiveListenerConfig, passiveListenerCallback)
-
-            // Assume registration submitted successfully if no exception was thrown.
             isListenerRegistered = true
             Log.i(logTag, "Passive listener registration submitted successfully.")
-        } catch (e: CancellationException) {
-            // This might occur if the calling coroutine scope is cancelled during the call
-            isListenerRegistered = false
-            Log.i(logTag, "Listener registration potentially cancelled (coroutine scope).", e)
         } catch (e: SecurityException) {
             isListenerRegistered = false
             Log.e(logTag, "Listener registration failed: SecurityException (Permissions revoked?). Stopping service.", e)
@@ -302,13 +333,12 @@ class HeartRateMonitorService : LifecycleService() {
 
         Log.i(logTag, "Attempting to unregister passive listener...")
         try {
-            // clearPassiveListenerCallbackAsync *does* return ListenableFuture<Void>, so await is correct here.
-            passiveMonitoringClient.clearPassiveListenerCallbackAsync().await<Void>()
+            passiveMonitoringClient.clearPassiveListenerCallbackAsync().await()
             isListenerRegistered = false
             Log.i(logTag, "Passive listener unregistration successful.")
         } catch (e: CancellationException) {
             isListenerRegistered = false
-            Log.i(logTag, "Listener unregistration cancelled.", e)
+            Log.i(logTag, "Listener unregistration cancelled (coroutine scope likely ending).", e)
         } catch (e: Exception) {
             isListenerRegistered = false
             Log.e(logTag, "Listener unregistration failed. Setting flag to false.", e)
@@ -316,8 +346,9 @@ class HeartRateMonitorService : LifecycleService() {
     }
 
     // --- Notification Management ---
+    // (No changes needed in createNotificationChannel or createNotification)
     private fun createNotificationChannel() {
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 NOTIFICATION_CHANNEL_ID,
                 NOTIFICATION_CHANNEL_NAME,
@@ -343,7 +374,7 @@ class HeartRateMonitorService : LifecycleService() {
         val launchActivityIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
         }
-        val pendingIntentFlags = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+        val pendingIntentFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         } else {
             PendingIntent.FLAG_UPDATE_CURRENT

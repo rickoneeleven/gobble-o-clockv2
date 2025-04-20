@@ -5,7 +5,7 @@ Context: Combined Project Brief & Phased Plan for Wear OS Fasting Heart Rate Mon
 Project Objective:
 - Create a personal Wear OS application for Galaxy Watch 4+ monitoring real-time heart rate to identify sustained lower periods (potential fasting correlation).
 - Runs primarily as a background Foreground Service.
-- Samples heart rate approximately once per minute (using a time gate filter).
+- Samples heart rate approximately once per minute (using a time gate filter based on callback time).
 - Triggers a one-time alert (vibrate/beep) and enters "Gobble Time" state after 5 consecutive processed readings <= user-defined Target Heart Rate.
 - Monitoring stops in "Gobble Time" state and only resumes after manual user "Reset".
 - Application state (`appState`, `consecutiveCount`) must persist across app/watch restarts.
@@ -27,8 +27,8 @@ Core Principles:
 
 Key Design Decisions & Logic Details:
 - Target Heart Rate: User-defined via app setting. User is responsible for determining the appropriate value; no in-app guidance provided. Default: 70 bpm.
-- Sampling Logic: Uses Health Services Passive Listener. To ensure reliability and avoid reacting to transient dips/noise, a time gate (`currentTimeMillis >= lastProcessedTimestamp + ~55000ms`) is applied. Only *one* reading (the latest in a batch) is processed if the gate condition passes. This aims for roughly 1-minute intervals between *processed* readings but depends on Health Services delivery timing.
-- Consecutive Reading Definition: "Consecutive" refers to 5 *sequentially processed readings* (i.e., readings that passed the ~1min time gate) that are <= `targetHeartRate`. The actual time elapsed between these processed readings might be more than 1 minute if data delivery is sparse.
+- Sampling Logic: Uses Health Services Passive Listener. To ensure reliability and avoid reacting to transient dips/noise, a time gate (`callbackTimeMillis >= lastProcessedTimestamp + ~55000ms`) is applied based on when the data callback is received. Only *one* reading (the latest in a batch) is processed if the gate condition passes. This aims for roughly 1-minute intervals between *processed* readings but depends on Health Services delivery timing. (Note: Using DataPoint timestamp proved problematic, sticking with callback time).
+- Consecutive Reading Definition: "Consecutive" refers to 5 *sequentially processed readings* (i.e., readings that passed the ~1min time gate) that are <= `targetHeartRate`. The actual time elapsed between these processed readings might be more than 1 minute.
 - Alert Mechanism: A single, one-time system notification (vibrate/beep) is triggered when entering "Gobble Time". If missed, user must manually check the app. This is acceptable for v2.
 - State Persistence (DataStore Keys & Types):
     - `appState`: String ("MONITORING" / "GOBBLE_TIME"), Default: "MONITORING"
@@ -44,62 +44,82 @@ Key Design Decisions & Logic Details:
 
 --- Phased Implementation Plan (Reorganized Batches) ---
 
---- Batch 0: Project Setup & Foundation ---
+-Context: Combined Project Brief & Phased Plan for Wear OS Fasting Heart Rate Monitor v2. This file tracks remaining work.
 
-- [COMPLETED] All Phase 0 tasks.
+ --- Batch 1: Stabilize Service & Implement Core Logic ---
 
---- Batch 1: Stabilize Service & Implement Core Logic ---
+ - In `HeartRateMonitorService`, implement collection of the `appState` flow from the repository to react to external changes (like Reset from UI).
 
-- [BLOCKED] **Resolve persistent build errors in `HeartRateMonitorService.kt` related to Health Services API.**
-    - **Current Blocker:** `Unresolved reference` error for timestamp methods (`getEndOriginTime`, `getTimeInstant`) on `SampleDataPoint`. This prevents compiling the core data processing logic.
-    - **Root Cause Analysis:** The necessary timestamp methods appear to be missing from the currently used and attempted `androidx.health:health-services-client` library versions (`1.0.0-rc01`, `1.0.0-rc02`, `1.0.0-beta02`). They were likely introduced in later versions.
-    - **Troubleshooting Steps Taken:**
-        - Corrected `PassiveListenerCallback` method signatures (using `onNewDataPointsReceived`, removing `onError`).
-        - Identified `SampleDataPoint` as the correct `DataPoint` subclass for Heart Rate.
-        - Attempted to use `getTimeInstant()` - resulted in `bootInstant` unresolved internal parameter error or `NoSuchMethodError`.
-        - Attempted to use `getEndOriginTime()` - resulted in `Unresolved reference` error.
-        - Switched from custom `serviceJob` to standard `lifecycleScope` for coroutine launching.
-        - Attempted Health Services library updates:
-            - `1.1.0`: Failed to download.
-            - `1.0.0-rc02`: Downloaded, but `getEndOriginTime` still unresolved.
-            - `1.0.0-beta02`: Downloaded, but `getEndOriginTime` still unresolved.
-    - **Next Steps:**
-        - Re-attempt download of a newer stable version (e.g., `1.1.0` or later) if network/cache issues resolve.
-        - OR Inspect the `SampleDataPoint` class definition within the original `1.0.0-rc01` library *very carefully* to find the *actual* timestamp method available in that specific version (might be named differently, e.g., `getTimestamp()`, or require accessing time via a different property).
-        - OR Consider if a different approach (e.g., using `SystemClock.elapsedRealtime()` and calculating offset, although less reliable) is feasible as a last resort if no direct timestamp method is available/usable in `1.0.0-rc01`.
+ - Implement Service logic reacting to `appState` changing from `GOBBLE_TIME` -> `MONITORING` (Reset): call `registerPassiveListener()`. Log re-registration.
 
-- [PENDING] Inject or provide `PreferencesRepository` to `HeartRateMonitorService` (using DI).
+ - Commit the functional service core.
 
-- [PENDING] Implement the ~1 minute sampling gate logic within the `PassiveListenerCallback` using `lastProcessedTimestamp`. Log processed/skipped status.
+ --- Batch 2: Develop UI Structure & ViewModel ---
 
-- [PENDING] Implement heart rate processing: update `lastDisplayedHr` (if used), update `lastProcessedTimestamp` in DataStore.
+ - Define `MainViewModel` responsible for holding UI state and interacting with `PreferencesRepository`.
 
-- [PENDING] Implement target comparison logic (`processed HR <= targetHeartRate`).
+ - Expose relevant `Flows` (e.g., `appStateFlow`, `consecutiveCountFlow`, `lastDisplayedHrFlow`, `targetHeartRateFlow`) from `PreferencesRepository` through the `ViewModel`.
 
-- [PENDING] Implement consecutive count update logic (increment or reset). Update `consecutiveCount` in DataStore. Log count changes.
+ - Implement UI state (`UiState` data class or similar) managed by the `ViewModel`.
 
-- [PENDING] Implement state transition logic (`consecutiveCount >= 5` -> `GOBBLE_TIME`). Update `appState` in DataStore.
+ - Create basic Compose UI layout in `MainActivity`:
+     - Display current HR (from `lastDisplayedHrFlow`).
+     - Display target HR (from `targetHeartRateFlow`).
+     - Display consecutive count (from `consecutiveCountFlow`).
+     - Display current status based on `appStateFlow` ("Monitoring", "Gobble Time!", "Permission Needed").
+     - Include placeholder for "Reset" button.
+     - Include placeholder for "Set Target" interaction.
+     - Include placeholder for navigating to Log screen.
 
-- [PENDING] Implement automatic listener unregistration when `appState` becomes `GOBBLE_TIME`. Log state change and unregistration.
+ - Connect the UI elements to observe state from the `ViewModel`.
 
-- [PENDING] Ensure `HeartRateMonitorService` reads initial state (`appState`, `consecutiveCount`, etc.) from DataStore on start.
+ - Implement basic navigation stub for Log screen.
 
-- [PENDING] In `HeartRateMonitorService`, implement collection of the `appState` flow from the repository to react to external changes (like Reset).
+ - Commit initial UI structure and ViewModel.
 
-- [PENDING] Implement Service logic reacting to `appState` changing from `GOBBLE_TIME` -> `MONITORING` (Reset): call `registerPassiveListener()`. Log re-registration.
+ --- Batch 3: Integrate UI, Service & Permissions ---
 
-- [PENDING] Enhance Logcat logging throughout `HeartRateMonitorService` for all implemented logic.
+ - Implement "Reset" button functionality:
+     - Button action calls a `ViewModel` function.
+     - `ViewModel` function calls `preferencesRepository.updateAppState(AppState.MONITORING)` and `preferencesRepository.updateConsecutiveCount(0)`.
+     - Ensure the service reacts to this state change via the flow observation implemented in Batch 1.
 
-- [PENDING] Commit the functional service core.
+ - Implement "Set Target Heart Rate" functionality:
+     - Create a simple input mechanism (e.g., a screen with a number picker or slider).
+     - Button/Action calls a `ViewModel` function.
+     - `ViewModel` function calls `preferencesRepository.updateTargetHeartRate(newRate)`.
 
---- Batch 2: Develop UI Structure & ViewModel ---
+ - Implement UI logic to check for `BODY_SENSORS` permission on Activity launch/resume.
+     - If granted, proceed.
+     - If denied, show an informative message and a "Grant Permission" button.
 
-- [PENDING] All Batch 2 tasks.
+ - Implement the "Grant Permission" button action to trigger the system permission request flow. Handle the permission result (update UI accordingly, potentially trigger service start/check).
 
---- Batch 3: Integrate UI, Service & Permissions ---
+ - Implement UI logic to check for `POST_NOTIFICATIONS` permission (Android 13+) if needed for alerts later. (Placeholder for now, maybe just check/log).
 
-- [PENDING] All Batch 3 tasks.
+ - Refine UI based on state (e.g., disable "Reset" button if already monitoring).
 
---- Batch 4: Implement Alerting & Persistent Logging ---
+ - Ensure `MainActivity` correctly starts the `HeartRateMonitorService` (e.g., `startForegroundService`) when permissions are granted and state is appropriate (or ensure service starts itself correctly on boot/restart if configured). Consider edge cases like starting service only if state is MONITORING.
 
-- [PENDING] All Batch 4 tasks.
+ - Commit integrated UI, service communication, and permission handling.
+
+ --- Batch 4: Implement Alerting & Persistent Logging ---
+
+ - Implement the alert mechanism when `appState` transitions to `GOBBLE_TIME` within the service:
+     - Check for `POST_NOTIFICATIONS` permission (if API >= 33). Log if denied.
+     - Create and display a simple, one-time system notification (separate from the foreground service notification) with vibration/sound.
+
+ - Implement persistent file logging:
+     - Choose a logging strategy (e.g., simple file writing, dedicated library).
+     - Create a `FileLogger` class/object, potentially managed by `MainApplication` as a singleton.
+     - Add logging calls in `HeartRateMonitorService` and `PreferencesRepository` (and later `ViewModel`/UI) for key events (state changes, HR processing, errors, service lifecycle, resets). Log timestamp, tag, message, and optionally stack traces for errors.
+     - Ensure logs are written to app-internal storage.
+
+ - Implement the Log Viewer UI screen:
+     - Read log entries from the persistent file.
+     - Display logs in a scrollable list (e.g., `LazyColumn`), showing timestamp and message.
+     - Implement basic log management (e.g., a "Clear Logs" button).
+
+ - Integrate navigation to the Log Viewer screen.
+
+ - Commit alerting and persistent logging features.
