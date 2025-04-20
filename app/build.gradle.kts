@@ -50,6 +50,7 @@ dependencies {
     implementation(libs.wear.tooling.preview)
     implementation(libs.activity.compose)
     implementation(libs.core.splashscreen)
+    implementation(libs.lifecycle.runtime.compose)
 
     // Added Dependencies per Phase 0
     implementation(libs.health.services.client)
