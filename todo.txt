@@ -1,17 +1,5 @@
 Context: Combined Project Brief & Phased Plan for Wear OS Fasting Heart Rate Monitor v2. This file tracks remaining work.
 
---- BLOCKER: MainActivity Not Launching on Emulator --- [RESOLVED] ---
-
-- **Resolution:** The failure was caused by an incorrect explicit call to `setTheme()` within `MainActivity.onCreate` after `super.onCreate()`, which conflicted with the theme handling provided by the `installSplashScreen()` library and the theme defined in the Manifest (`MainActivityTheme.Starting`). Removing the explicit `setTheme()` call resolved the launch failure. The placeholder UI (`WearApp`) is now displaying correctly.
-- **Previous Status:** The application compiled successfully and could be installed on a Wear OS emulator. Logcat confirmed the application process starts and `MainApplication.onCreate` executes (initializing `PreferencesRepository`). However, `MainActivity.onCreate` did not appear to be called, and the application UI was never displayed; the emulator typically returned to the watch face or app list after installation/launch attempt. No fatal crash logs were observed in Logcat.
-- **Previous Problem:** The primary user interface (`MainActivity`) was failing to launch, preventing any UI interaction or visual confirmation of the application state.
-- **Previous Suspected Causes:**
-    1.  **`AndroidManifest.xml` Configuration Error:** Incorrect declaration of `MainActivity`, missing/incorrect `android:exported` attribute, or malformed `<intent-filter>` for the MAIN/LAUNCHER action. (Checked, minor `taskAffinity` change didn't fix).
-    2.  **Emulator Issue:** Potential graphics/windowing incompatibility or deeper glitch within the specific emulator instance preventing activity window creation (though less likely to fail silently).
-    3.  **System Interference:** Extremely unlikely, but some system process preventing the activity launch.
-    4.  **[Actual Cause] Theme/Splash Screen Conflict:** Incorrect theme application in `MainActivity.onCreate`.
-- **Impact:** This blocker previously prevented *any* UI testing or interaction, halting progress on all subsequent UI integration, permission handling, and feature implementation tasks (Batches 2, 3, 4). **This is now unblocked.**
-
 --- Project Brief & Specifications ---
 
 Project Objective:
@@ -50,41 +38,26 @@ Key Design Decisions & Logic Details:
     - `lastDisplayedHr`: Integer (optional, for smoother UI updates), Default: 0
 - Background Execution: Mandatory Foreground Service with a persistent notification indicating active monitoring.
 - Permissions (`BODY_SENSORS`, `POST_NOTIFICATIONS` [for Android 13+ alerts]):
-    - App UI checks on launch/resume. If denied, displays explanation and "Grant Permission" button triggering system request. Blocks function until granted.
+    - App UI checks on launch/resume. If denied, displays explanation and "Grant Permission" button triggering system request. Blocks function until granted. (BODY_SENSORS implemented)
     - Service checks on start and stops itself if permission is not granted or revoked.
 - In-App Logging: A dedicated UI screen will display timestamped logs read from a persistent file stored in app-internal storage. Will include key events (service state, HR processing, state changes, resets, errors). Basic log management (clear button or rotation) required.
 
---- Phased Implementation Plan (Reorganized Batches) ---
+--- Remaining Tasks (Batches 2-4 Combined) ---
 
--Context: Combined Project Brief & Phased Plan for Wear OS Fasting Heart Rate Monitor v2. This file tracks remaining work.
+- [UNBLOCKED] - Implement "Reset" button functionality: Button -> ViewModel -> Repository (`updateAppState`, `updateConsecutiveCount`) -> Service Reaction.
 
---- Batch 1: Stabilize Service & Implement Core Logic ---
- [COMPLETED] - In `HeartRateMonitorService`, implement collection of the `appState` flow from the repository to react to external changes (like Reset from UI).
- [COMPLETED] - Implement Service logic reacting to `appState` changing from `GOBBLE_TIME` -> `MONITORING` (Reset): call `registerPassiveListener()`. Log re-registration.
- [COMPLETED] - Commit the functional service core.
+- [UNBLOCKED] - Implement "Set Target Heart Rate" functionality: Input UI -> ViewModel -> Repository (`updateTargetHeartRate`).
 
---- Batch 2: Develop UI Structure & ViewModel ---
- [COMPLETED] - Define `MainViewModel` responsible for holding UI state and interacting with `PreferencesRepository`.
- [COMPLETED] - Expose relevant `Flows` via a combined `StateFlow<MainUiState>`.
- [COMPLETED] - Implement UI state (`MainUiState` data class defined).
- [COMPLETED - Blocker Resolved] - Create basic Compose UI layout in `MainActivity`. (Current placeholder UI works).
- [UNBLOCKED] - Connect the UI elements to observe state from the `ViewModel`. (Verify state flows correctly to UI). <-- NEXT STEP
- [UNBLOCKED] - Implement basic navigation stub for Log screen.
- [UNBLOCKED] - Commit initial UI structure and ViewModel.
+- [UNBLOCKED] - Refine UI based on state (e.g., show/hide/enable/disable "Reset" button based on `appState`, potentially disable target setting during `GOBBLE_TIME`).
 
---- Batch 3: Integrate UI, Service & Permissions ---
- [UNBLOCKED] - Implement "Reset" button functionality: Button -> ViewModel -> Repository -> Service Reaction.
- [UNBLOCKED] - Implement "Set Target Heart Rate" functionality: Input -> ViewModel -> Repository.
- [UNBLOCKED] - Implement UI logic to check for `BODY_SENSORS` permission on Activity launch/resume. Show message/button if denied.
- [UNBLOCKED] - Implement the "Grant Permission" button action to trigger the system permission request flow. Handle result.
- [UNBLOCKED] - Implement UI logic to check for `POST_NOTIFICATIONS` permission (Android 13+). (Placeholder check/log).
- [UNBLOCKED] - Refine UI based on state (e.g., disable "Reset" button).
- [UNBLOCKED] - Ensure `MainActivity` correctly starts the `HeartRateMonitorService`. Consider edge cases.
- [UNBLOCKED] - Commit integrated UI, service communication, and permission handling.
+- [UNBLOCKED] - Implement basic navigation stub for Log screen & Integrate navigation to the Log Viewer screen.
 
---- Batch 4: Implement Alerting & Persistent Logging ---
- [UNBLOCKED] - Implement the alert mechanism when `appState` transitions to `GOBBLE_TIME` within the service. Check `POST_NOTIFICATIONS`. Create/display notification.
- [UNBLOCKED] - Implement persistent file logging: Choose strategy, create logger, add logging calls (Service, Repo, VM, UI), write to internal storage.
- [UNBLOCKED] - Implement the Log Viewer UI screen: Read logs, display in list, implement "Clear Logs".
- [UNBLOCKED] - Integrate navigation to the Log Viewer screen.
- [UNBLOCKED] - Commit alerting and persistent logging features.
+- [UNBLOCKED] - Implement UI logic to check for `POST_NOTIFICATIONS` permission (Android 13+). (Start with placeholder check/log, then integrate with alert).
+
+- [UNBLOCKED] - Implement the alert mechanism when `appState` transitions to `GOBBLE_TIME` within the service. Check `POST_NOTIFICATIONS`. Create/display notification.
+
+- [UNBLOCKED] - Implement persistent file logging: Choose strategy, create logger class/object, add logging calls (Service, Repo, VM, UI), write to internal storage.
+
+- [UNBLOCKED] - Implement the Log Viewer UI screen: Read logs, display in list, implement "Clear Logs".
+
+- [UNBLOCKED] - Commit remaining features iteratively.

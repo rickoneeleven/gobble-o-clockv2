@@ -1,38 +1,41 @@
 package com.example.gobble_o_clockv2.presentation
 
-import android.Manifest // Import Manifest
-import android.content.Intent // Import Intent
-import android.content.pm.PackageManager // Import PackageManager
-import android.net.Uri // Import Uri
+import android.Manifest
+import android.content.Intent // Import Intent for starting service
+import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Bundle
-import android.provider.Settings // Import Settings
-import android.util.Log // Import Log
+import android.provider.Settings
+import android.util.Log
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult // Import rememberLauncherForActivityResult
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts // Import ActivityResultContracts
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.runtime.* // Import foundational composables and state management
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext // Import LocalContext
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat // Import ContextCompat
+import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.wear.compose.material.*
 import androidx.wear.tooling.preview.devices.WearDevices
 import com.example.gobble_o_clockv2.R
-import com.example.gobble_o_clockv2.data.AppState
+import com.example.gobble_o_clockv2.data.AppState // Ensure AppState is imported
 import com.example.gobble_o_clockv2.presentation.theme.Gobbleoclockv2Theme
+import com.example.gobble_o_clockv2.service.HeartRateMonitorService // Import the service
 
 class MainActivity : ComponentActivity() {
 
-    private val logTag: String = "MainActivity" // Add log tag
+    private val logTag: String = "MainActivity"
     private val viewModel: MainViewModel by viewModels { MainViewModel.Factory }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -41,64 +44,72 @@ class MainActivity : ComponentActivity() {
         Log.d(logTag, "onCreate called.")
 
         setContent {
-            // Collect the UI state flow from the ViewModel
             val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+            val context = LocalContext.current
+            var permissionRequested by remember { mutableStateOf(false) }
 
             // --- Permission Handling ---
-            val context = LocalContext.current
-            var permissionRequested by remember { mutableStateOf(false) } // Track if request was launched
-
-            // Permission Launcher
             val permissionLauncher = rememberLauncherForActivityResult(
                 contract = ActivityResultContracts.RequestPermission(),
                 onResult = { isGranted ->
                     Log.i(logTag, "BODY_SENSORS permission result: $isGranted")
-                    viewModel.updatePermissionStatus(isGranted) // Update ViewModel with the result
-                    permissionRequested = false // Reset tracker after result
-                    if (!isGranted) {
-                        // Optional: Handle persistent denial or show rationale if needed later
-                        // Log.w(logTag, "Permission denied.")
-                        // Consider showing a Snackbar or persistent message about limited functionality
-                    } else {
-                        Log.i(logTag, "Permission granted. Service should be able to start/monitor.")
-                        // TODO: Potentially trigger service start here if not already running and state is MONITORING
-                        // This interaction needs careful consideration in Batch 3.
-                    }
+                    viewModel.updatePermissionStatus(isGranted)
+                    permissionRequested = false
+                    // Service start logic is now handled by LaunchedEffect below
                 }
             )
 
-            // Effect to check permission status when the composable launches or resumes
-            // Using DisposableEffect to handle potential recompositions more robustly
+            // Effect to check permission on initial composition
             DisposableEffect(Unit) {
-                Log.d(logTag, "DisposableEffect launched for permission check.")
-                val checkPermission = {
-                    val isGranted = ContextCompat.checkSelfPermission(
-                        context, Manifest.permission.BODY_SENSORS
-                    ) == PackageManager.PERMISSION_GRANTED
-                    Log.d(logTag, "Initial permission check status: $isGranted")
-                    viewModel.updatePermissionStatus(isGranted) // Update VM immediately
-                }
-                checkPermission() // Initial check
+                Log.d(logTag, "DisposableEffect launched for initial permission check.")
+                val isGranted = ContextCompat.checkSelfPermission(
+                    context, Manifest.permission.BODY_SENSORS
+                ) == PackageManager.PERMISSION_GRANTED
+                Log.d(logTag, "Initial permission check status: $isGranted")
+                viewModel.updatePermissionStatus(isGranted)
+                onDispose { Log.d(logTag, "DisposableEffect disposed.") }
+            }
 
-                // Implement onResume-like behavior if needed (e.g., using LifecycleEventObserver)
-                // For now, the initial check and launcher result cover the main cases.
-
-                onDispose {
-                    Log.d(logTag, "DisposableEffect disposed.")
+            // --- Service Start Logic ---
+            // LaunchedEffect triggers whenever permission status or app state changes
+            LaunchedEffect(uiState.isPermissionGranted, uiState.appState) {
+                Log.d(logTag, "LaunchedEffect triggered: isPermissionGranted=${uiState.isPermissionGranted}, appState=${uiState.appState}")
+                if (uiState.isPermissionGranted && uiState.appState == AppState.MONITORING) {
+                    Log.i(logTag, "Conditions met (Permission Granted & State MONITORING). Attempting to start service...")
+                    val serviceIntent = Intent(context, HeartRateMonitorService::class.java)
+                    try {
+                        // Use startForegroundService for Android O+ (minSdk is 30, so always use this)
+                        ContextCompat.startForegroundService(context, serviceIntent)
+                        Log.i(logTag, "startForegroundService called successfully.")
+                    } catch (e: Exception) {
+                        // Catch potential SecurityException if permissions are revoked between check and start,
+                        // or IllegalStateException if app is in background restriction state.
+                        Log.e(logTag, "Failed to start HeartRateMonitorService", e)
+                        // TODO: Consider notifying the user or updating UI state if start fails critically
+                    }
+                } else {
+                    // Log why the service wasn't started
+                    val reason = when {
+                        !uiState.isPermissionGranted -> "Permission not granted"
+                        uiState.appState != AppState.MONITORING -> "App state is not MONITORING (${uiState.appState})"
+                        else -> "Unknown reason" // Should not happen with current checks
+                    }
+                    Log.i(logTag, "Conditions not met to start service: $reason")
+                    // TODO: Consider explicitly stopping the service here if the state becomes GOBBLE_TIME?
+                    // Though the service itself should handle unregistering based on state changes.
                 }
             }
 
-
-            // Render the main UI
+            // --- Render UI ---
             WearApp(
                 uiState = uiState,
                 onRequestPermission = {
                     if (!permissionRequested) {
                         Log.i(logTag, "Requesting BODY_SENSORS permission...")
-                        permissionRequested = true // Set tracker before launching
+                        permissionRequested = true
                         permissionLauncher.launch(Manifest.permission.BODY_SENSORS)
                     } else {
-                        Log.d(logTag, "Permission request already in progress, ignoring button click.")
+                        Log.d(logTag, "Permission request already in progress.")
                     }
                 }
             )
@@ -108,18 +119,23 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         Log.d(logTag, "onResume called. Re-checking permission status.")
-        // Re-check permission status when activity resumes, as user might grant it in settings
+        // Re-check permission status when activity resumes
         val isGranted = ContextCompat.checkSelfPermission(
             this, Manifest.permission.BODY_SENSORS
         ) == PackageManager.PERMISSION_GRANTED
-        viewModel.updatePermissionStatus(isGranted)
+        // Only update if the state might have changed externally
+        if (viewModel.uiState.value.isPermissionGranted != isGranted) {
+            Log.i(logTag, "Permission status potentially changed externally, updating ViewModel.")
+            viewModel.updatePermissionStatus(isGranted)
+            // The LaunchedEffect will react to this state change if needed
+        }
     }
 }
 
 @Composable
 fun WearApp(
     uiState: MainUiState,
-    onRequestPermission: () -> Unit // Callback to trigger permission request
+    onRequestPermission: () -> Unit
 ) {
     Gobbleoclockv2Theme {
         Scaffold(
@@ -131,7 +147,6 @@ fun WearApp(
                     .background(MaterialTheme.colors.background),
                 contentAlignment = Alignment.Center
             ) {
-                // Pass permission request callback down
                 StateDisplay(
                     uiState = uiState,
                     onRequestPermission = onRequestPermission
@@ -144,40 +159,42 @@ fun WearApp(
 @Composable
 fun StateDisplay(
     uiState: MainUiState,
-    onRequestPermission: () -> Unit // Callback to trigger permission request
+    onRequestPermission: () -> Unit
 ) {
-    val context = LocalContext.current // Get context for opening settings
+    val context = LocalContext.current
+    val scrollState = rememberScrollState()
 
     Column(
         modifier = Modifier
-            .fillMaxWidth() // Ensure column takes full width for centering button
-            .padding(16.dp),
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .verticalScroll(scrollState)
+            .padding(vertical = 8.dp), // Adjusted padding
         horizontalAlignment = Alignment.CenterHorizontally,
-        // *** MODIFIED LINE: Removed Alignment.CenterVertically ***
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        // Display Current Heart Rate
+        // HR Display
         Text(
             text = "HR: ${if (uiState.lastDisplayedHr > 0) uiState.lastDisplayedHr else "--"}",
             style = MaterialTheme.typography.display1,
             textAlign = TextAlign.Center
         )
 
-        // Display Target Heart Rate
+        // Target HR
         Text(
             text = "Target: ${uiState.targetHeartRate} bpm",
             style = MaterialTheme.typography.caption1,
             textAlign = TextAlign.Center
         )
 
-        // Display Consecutive Count
+        // Consecutive Count
         Text(
             text = "Count: ${uiState.consecutiveCount}",
             style = MaterialTheme.typography.body1,
             textAlign = TextAlign.Center
         )
 
-        // Display Application State
+        // App State Status
         Text(
             text = "Status: ${uiState.appState.name}",
             style = MaterialTheme.typography.body2,
@@ -185,7 +202,7 @@ fun StateDisplay(
             color = if (uiState.appState == AppState.GOBBLE_TIME) MaterialTheme.colors.primary else MaterialTheme.colors.onBackground
         )
 
-        Spacer(modifier = Modifier.height(8.dp)) // Add space before permission info/button
+        Spacer(modifier = Modifier.height(8.dp))
 
         // Conditional Permission UI
         if (uiState.isPermissionGranted) {
@@ -193,33 +210,30 @@ fun StateDisplay(
                 text = "Sensor Permission: Granted",
                 style = MaterialTheme.typography.caption2,
                 textAlign = TextAlign.Center,
-                color = MaterialTheme.colors.secondary // Greenish color for granted
+                color = MaterialTheme.colors.secondary
             )
         } else {
-            // Show message and button if permission is needed
             Text(
                 text = "Sensor permission needed for heart rate monitoring.",
-                style = MaterialTheme.typography.caption1, // Slightly larger for emphasis
+                style = MaterialTheme.typography.caption1,
                 textAlign = TextAlign.Center,
-                color = MaterialTheme.colors.error // Red color for needed
+                color = MaterialTheme.colors.error
             )
             Spacer(modifier = Modifier.height(4.dp))
-            // Use Chip for standard Wear OS button style
             Chip(
                 modifier = Modifier.padding(top = 4.dp),
                 label = { Text("Grant Permission") },
-                onClick = onRequestPermission, // Trigger the request
+                onClick = onRequestPermission,
                 colors = ChipDefaults.primaryChipColors()
             )
-            // Optional: Add a button/link to open App Settings if permission is permanently denied
-            Button( // Example: Button to go to settings
+            Button(
                 onClick = {
                     val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
                     intent.data = Uri.fromParts("package", context.packageName, null)
                     context.startActivity(intent)
                 },
                 modifier = Modifier.padding(top = 4.dp),
-                colors = ButtonDefaults.secondaryButtonColors() // Different color for settings
+                colors = ButtonDefaults.secondaryButtonColors()
             ) {
                 Text("Open Settings", style = MaterialTheme.typography.caption2)
             }
@@ -227,9 +241,7 @@ fun StateDisplay(
     }
 }
 
-
 // --- Previews ---
-// Helper function to create preview state easily
 @Composable
 private fun rememberPreviewState(
     appState: AppState = AppState.MONITORING,
@@ -246,7 +258,6 @@ private fun rememberPreviewState(
         isPermissionGranted = isPermissionGranted
     )
 }
-
 
 @Preview(device = WearDevices.SMALL_ROUND, showSystemUi = true)
 @Composable
