@@ -1,12 +1,5 @@
 Context: Combined Project Brief & Phased Plan for Wear OS Fasting Heart Rate Monitor v2. This file tracks remaining work.
 
---- BLOCKER: Resolve Syntax Error in MainViewModel Flow Combination ---
-
-- **Current Status:** A minimal `MainViewModel` compiles and is correctly recognized by `MainActivity`, resolving the previous "Unresolved reference: MainViewModel" and delegate errors related to basic type resolution.
-- **Problem:** Reintroducing the logic to `combine` multiple flows (`appStateFlow`, `consecutiveCountFlow`, `lastDisplayedHrFlow`, `targetHeartRateFlow`) from `PreferencesRepository` into a single `StateFlow<MainUiState>` within `MainViewModel.kt` causes compilation errors ("Unresolved reference" to state properties, type inference issues, etc.).
-- **Next Step:** Carefully re-implement or debug the `combine` operation and the construction of `MainUiState` within the `MainViewModel.kt`'s `uiState` definition to fix the underlying syntax or type error. Examine imports related to `kotlinx.coroutines.flow` (`combine`, `stateIn`, etc.) and ensure correct usage of parameters within the `combine` lambda.
-- **Impact:** This blocker prevents the UI (`MainActivity`) from accessing the complete, combined application state, thereby halting progress on connecting UI elements, implementing button actions, permission handling, and subsequent features.
-
 --- Project Brief & Specifications ---
 
 Project Objective:
@@ -60,26 +53,26 @@ Key Design Decisions & Logic Details:
 
 --- Batch 2: Develop UI Structure & ViewModel ---
  [COMPLETED] - Define `MainViewModel` responsible for holding UI state and interacting with `PreferencesRepository`.
- [IN PROGRESS - BLOCKED] - Expose relevant `Flows` via a combined `StateFlow<MainUiState>` (Compilation error in `combine` logic).
- [IN PROGRESS - BLOCKED] - Implement UI state (`MainUiState` data class defined, but blocked by `combine` error).
- [COMPLETED - Code Provided, but BLOCKED by `MainViewModel` Error] - Create basic Compose UI layout in `MainActivity`.
- [BLOCKED] - Connect the UI elements to observe state from the `ViewModel`.
- [BLOCKED] - Implement basic navigation stub for Log screen.
- [BLOCKED] - Commit initial UI structure and ViewModel.
+ [COMPLETED] - Expose relevant `Flows` via a combined `StateFlow<MainUiState>`. (Compilation error resolved).
+ [COMPLETED] - Implement UI state (`MainUiState` data class defined).
+ [COMPLETED] - Create basic Compose UI layout in `MainActivity`: Display state, placeholders for buttons/nav.
+ [NEXT] - Connect the UI elements to observe state from the `ViewModel`. (Verify state flows correctly to UI).
+ - Implement basic navigation stub for Log screen.
+ - Commit initial UI structure and ViewModel.
 
 --- Batch 3: Integrate UI, Service & Permissions ---
- [BLOCKED] - Implement "Reset" button functionality: Button -> ViewModel -> Repository -> Service Reaction.
- [BLOCKED] - Implement "Set Target Heart Rate" functionality: Input -> ViewModel -> Repository.
- [BLOCKED] - Implement UI logic to check for `BODY_SENSORS` permission on Activity launch/resume. Show message/button if denied.
- [BLOCKED] - Implement the "Grant Permission" button action to trigger the system permission request flow. Handle result.
- [BLOCKED] - Implement UI logic to check for `POST_NOTIFICATIONS` permission (Android 13+). (Placeholder check/log).
- [BLOCKED] - Refine UI based on state (e.g., disable "Reset" button).
- [BLOCKED] - Ensure `MainActivity` correctly starts the `HeartRateMonitorService`. Consider edge cases.
- [BLOCKED] - Commit integrated UI, service communication, and permission handling.
+ - Implement "Reset" button functionality: Button -> ViewModel -> Repository -> Service Reaction.
+ - Implement "Set Target Heart Rate" functionality: Input -> ViewModel -> Repository.
+ - Implement UI logic to check for `BODY_SENSORS` permission on Activity launch/resume. Show message/button if denied.
+ - Implement the "Grant Permission" button action to trigger the system permission request flow. Handle result.
+ - Implement UI logic to check for `POST_NOTIFICATIONS` permission (Android 13+). (Placeholder check/log).
+ - Refine UI based on state (e.g., disable "Reset" button).
+ - Ensure `MainActivity` correctly starts the `HeartRateMonitorService`. Consider edge cases.
+ - Commit integrated UI, service communication, and permission handling.
 
 --- Batch 4: Implement Alerting & Persistent Logging ---
- [BLOCKED] - Implement the alert mechanism when `appState` transitions to `GOBBLE_TIME` within the service. Check `POST_NOTIFICATIONS`. Create/display notification.
- [BLOCKED] - Implement persistent file logging: Choose strategy, create logger, add logging calls (Service, Repo, VM, UI), write to internal storage.
- [BLOCKED] - Implement the Log Viewer UI screen: Read logs, display in list, implement "Clear Logs".
- [BLOCKED] - Integrate navigation to the Log Viewer screen.
- [BLOCKED] - Commit alerting and persistent logging features.
+ - Implement the alert mechanism when `appState` transitions to `GOBBLE_TIME` within the service. Check `POST_NOTIFICATIONS`. Create/display notification.
+ - Implement persistent file logging: Choose strategy, create logger, add logging calls (Service, Repo, VM, UI), write to internal storage.
+ - Implement the Log Viewer UI screen: Read logs, display in list, implement "Clear Logs".
+ - Integrate navigation to the Log Viewer screen.
+ - Commit alerting and persistent logging features.
