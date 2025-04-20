@@ -34,17 +34,13 @@ class MainViewModel(
 
     // Internal state flow to hold the current permission status
     private val _permissionGranted = MutableStateFlow(false)
-    // Expose permission status potentially, though it's mainly used internally for uiState
-    // val permissionGranted: StateFlow<Boolean> = _permissionGranted.asStateFlow()
 
     init {
         Log.i(logTag, "MainViewModel initializing.")
-        // Initial permission check will happen in the Activity's LaunchedEffect/onResume
     }
 
     /**
      * Updates the internal state reflecting the BODY_SENSORS permission status.
-     * Called by the Activity after checking or receiving the permission request result.
      */
     fun updatePermissionStatus(isGranted: Boolean) {
         if (_permissionGranted.value != isGranted) { // Only update if changed
@@ -59,24 +55,19 @@ class MainViewModel(
         preferencesRepository.consecutiveCountFlow,
         preferencesRepository.lastDisplayedHrFlow,
         preferencesRepository.targetHeartRateFlow,
-        _permissionGranted // Add the permission state flow to the combine
-    ) { appStateValue, consecutiveCountValue, lastDisplayedHrValue, targetHeartRateValue, permissionGrantedValue -> // Add parameter for permission
-
-        // Log the combined values (optional, for debugging)
-        // Log.d(logTag, "Combining flows: State=$appStateValue, Count=$consecutiveCountValue, HR=$lastDisplayedHrValue, Target=$targetHeartRateValue, Perm=$permissionGrantedValue")
-
-        // Construct the MainUiState object using the received values
+        _permissionGranted
+    ) { appStateValue, consecutiveCountValue, lastDisplayedHrValue, targetHeartRateValue, permissionGrantedValue ->
         MainUiState(
             appState = appStateValue,
             consecutiveCount = consecutiveCountValue,
             lastDisplayedHr = lastDisplayedHrValue,
             targetHeartRate = targetHeartRateValue,
-            isPermissionGranted = permissionGrantedValue // Use the value from the permission state flow
+            isPermissionGranted = permissionGrantedValue
         )
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
-        initialValue = MainUiState() // Initial state will have isPermissionGranted = false
+        initialValue = MainUiState()
     )
 
 
@@ -90,7 +81,6 @@ class MainViewModel(
         Log.i(logTag, "Reset monitoring requested by UI.")
         viewModelScope.launch {
             try {
-                // Verify current state before resetting (optional, but good practice)
                 val currentState = preferencesRepository.appStateFlow.first()
                 if (currentState == AppState.GOBBLE_TIME) {
                     Log.d(logTag, "Current state is GOBBLE_TIME, proceeding with reset.")
@@ -102,22 +92,42 @@ class MainViewModel(
                 }
             } catch (e: IOException) {
                 Log.e(logTag, "IOException during resetMonitoring data store operation.", e)
-                // Consider showing error to user if critical
             } catch (e: Exception) {
                 Log.e(logTag, "Failed to reset monitoring state.", e)
-                // Consider showing error to user if critical
             }
         }
     }
 
-    // fun updateTargetHeartRate(newRate: Int) { ... } // Placeholder for next task
+    /**
+     * Updates the target heart rate preference.
+     * Performs basic validation (e.g., positive value).
+     */
+    fun updateTargetHeartRate(newRate: Int) {
+        Log.i(logTag, "Update target heart rate requested by UI: $newRate")
+        // Basic validation: Ensure rate is somewhat reasonable (e.g., > 30)
+        if (newRate < 30 || newRate > 200) { // Example range
+            Log.w(logTag, "Invalid target heart rate proposed: $newRate. Update rejected.")
+            // TODO: Provide feedback to the user? (e.g., via a temporary state or event)
+            return
+        }
+        viewModelScope.launch {
+            try {
+                preferencesRepository.updateTargetHeartRate(newRate)
+                Log.i(logTag, "Target heart rate updated successfully to $newRate.")
+            } catch (e: IOException) {
+                Log.e(logTag, "IOException during updateTargetHeartRate data store operation.", e)
+            } catch (e: Exception) {
+                Log.e(logTag, "Failed to update target heart rate.", e)
+            }
+        }
+    }
 
     override fun onCleared() {
         super.onCleared()
         Log.i(logTag, "MainViewModel cleared.")
     }
 
-    // --- ViewModel Factory (Remains the same) ---
+    // --- ViewModel Factory ---
     companion object {
         val Factory: ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")

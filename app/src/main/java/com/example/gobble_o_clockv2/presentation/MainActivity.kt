@@ -1,7 +1,7 @@
 package com.example.gobble_o_clockv2.presentation
 
 import android.Manifest
-import android.content.Intent // Import Intent for starting service
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
@@ -16,9 +16,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.runtime.*
+import androidx.compose.runtime.* // Keep wildcard import
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color // Import Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
@@ -27,12 +29,15 @@ import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.wear.compose.material.*
+import androidx.wear.compose.material.dialog.Alert
+import androidx.wear.compose.material.dialog.Dialog
 import androidx.wear.tooling.preview.devices.WearDevices
 import com.example.gobble_o_clockv2.R
-import com.example.gobble_o_clockv2.data.AppState // Ensure AppState is imported
+import com.example.gobble_o_clockv2.data.AppState
 import com.example.gobble_o_clockv2.presentation.theme.Gobbleoclockv2Theme
-import com.example.gobble_o_clockv2.service.HeartRateMonitorService // Import the service
+import com.example.gobble_o_clockv2.service.HeartRateMonitorService
 
+// (MainActivity class and WearApp composable remain unchanged from the previous correct version)
 class MainActivity : ComponentActivity() {
 
     private val logTag: String = "MainActivity"
@@ -46,7 +51,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             val uiState by viewModel.uiState.collectAsStateWithLifecycle()
             val context = LocalContext.current
-            var permissionRequested by remember { mutableStateOf(false) }
+            var permissionRequested by rememberSaveable { mutableStateOf(false) }
 
             // --- Permission Handling ---
             val permissionLauncher = rememberLauncherForActivityResult(
@@ -55,7 +60,6 @@ class MainActivity : ComponentActivity() {
                     Log.i(logTag, "BODY_SENSORS permission result: $isGranted")
                     viewModel.updatePermissionStatus(isGranted)
                     permissionRequested = false
-                    // Service start logic is handled by LaunchedEffect below
                 }
             )
 
@@ -81,7 +85,6 @@ class MainActivity : ComponentActivity() {
                         Log.i(logTag, "startForegroundService called successfully.")
                     } catch (e: Exception) {
                         Log.e(logTag, "Failed to start HeartRateMonitorService", e)
-                        // TODO: Consider notifying user or updating UI state if start fails critically
                     }
                 } else {
                     val reason = when {
@@ -90,15 +93,6 @@ class MainActivity : ComponentActivity() {
                         else -> "Unknown reason"
                     }
                     Log.i(logTag, "Conditions not met to start service: $reason")
-                    // Stop service if state is GOBBLE_TIME?
-                    // Note: The service already handles unregistering its listener based on state.
-                    // Explicitly stopping might be desired if the service does *nothing* else in GOBBLE_TIME.
-                    // Let's rely on the service's internal state handling for now.
-                    // if (uiState.appState == AppState.GOBBLE_TIME) {
-                    //     val serviceIntent = Intent(context, HeartRateMonitorService::class.java)
-                    //     context.stopService(serviceIntent) // Consider implications carefully
-                    //     Log.i(logTag, "Stopping service due to GOBBLE_TIME state.")
-                    // }
                 }
             }
 
@@ -114,9 +108,8 @@ class MainActivity : ComponentActivity() {
                         Log.d(logTag, "Permission request already in progress.")
                     }
                 },
-                onResetMonitoring = { // Pass the reset callback down
-                    viewModel.resetMonitoring()
-                }
+                onResetMonitoring = viewModel::resetMonitoring,
+                onUpdateTargetHeartRate = viewModel::updateTargetHeartRate
             )
         }
     }
@@ -124,15 +117,12 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         Log.d(logTag, "onResume called. Re-checking permission status.")
-        // Re-check permission status when activity resumes
         val isGranted = ContextCompat.checkSelfPermission(
             this, Manifest.permission.BODY_SENSORS
         ) == PackageManager.PERMISSION_GRANTED
-        // Only update if the state might have changed externally (e.g., via settings)
         if (viewModel.uiState.value.isPermissionGranted != isGranted) {
             Log.i(logTag, "Permission status potentially changed externally, updating ViewModel.")
             viewModel.updatePermissionStatus(isGranted)
-            // The LaunchedEffect will react to this state change if needed
         }
     }
 }
@@ -141,7 +131,8 @@ class MainActivity : ComponentActivity() {
 fun WearApp(
     uiState: MainUiState,
     onRequestPermission: () -> Unit,
-    onResetMonitoring: () -> Unit // Added callback parameter
+    onResetMonitoring: () -> Unit,
+    onUpdateTargetHeartRate: (Int) -> Unit
 ) {
     Gobbleoclockv2Theme {
         Scaffold(
@@ -156,7 +147,8 @@ fun WearApp(
                 StateDisplay(
                     uiState = uiState,
                     onRequestPermission = onRequestPermission,
-                    onResetMonitoring = onResetMonitoring // Pass down the callback
+                    onResetMonitoring = onResetMonitoring,
+                    onUpdateTargetHeartRate = onUpdateTargetHeartRate
                 )
             }
         }
@@ -167,10 +159,22 @@ fun WearApp(
 fun StateDisplay(
     uiState: MainUiState,
     onRequestPermission: () -> Unit,
-    onResetMonitoring: () -> Unit // Added callback parameter
+    onResetMonitoring: () -> Unit,
+    onUpdateTargetHeartRate: (Int) -> Unit
 ) {
     val context = LocalContext.current
     val scrollState = rememberScrollState()
+    var showTargetDialog by rememberSaveable { mutableStateOf(false) }
+
+    TargetHeartRateDialog(
+        showDialog = showTargetDialog,
+        initialValue = uiState.targetHeartRate,
+        onDismiss = { showTargetDialog = false },
+        onConfirm = { newValue ->
+            onUpdateTargetHeartRate(newValue)
+            showTargetDialog = false
+        }
+    )
 
     Column(
         modifier = Modifier
@@ -181,28 +185,34 @@ fun StateDisplay(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        // HR Display
         Text(
             text = "HR: ${if (uiState.lastDisplayedHr > 0) uiState.lastDisplayedHr else "--"}",
             style = MaterialTheme.typography.display1,
             textAlign = TextAlign.Center
         )
 
-        // Target HR
-        Text(
-            text = "Target: ${uiState.targetHeartRate} bpm",
-            style = MaterialTheme.typography.caption1,
-            textAlign = TextAlign.Center
+        Chip(
+            modifier = Modifier.padding(top = 0.dp, bottom = 4.dp),
+            label = { Text("Target: ${uiState.targetHeartRate} bpm") },
+            onClick = { if (uiState.isPermissionGranted) showTargetDialog = true },
+            colors = ChipDefaults.secondaryChipColors(),
+            enabled = uiState.isPermissionGranted
         )
+        if (!uiState.isPermissionGranted && uiState.appState == AppState.MONITORING) {
+            Text(
+                text = "(Grant permission to change)",
+                style = MaterialTheme.typography.caption2,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(bottom = 4.dp)
+            )
+        }
 
-        // Consecutive Count
         Text(
             text = "Count: ${uiState.consecutiveCount}",
             style = MaterialTheme.typography.body1,
             textAlign = TextAlign.Center
         )
 
-        // App State Status
         Text(
             text = "Status: ${uiState.appState.name}",
             style = MaterialTheme.typography.body2,
@@ -212,18 +222,14 @@ fun StateDisplay(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // --- Action Buttons Area ---
-
-        // Reset Button (Conditional)
         if (uiState.appState == AppState.GOBBLE_TIME) {
             Chip(
                 modifier = Modifier.padding(top = 4.dp),
                 label = { Text("Reset Monitor") },
-                onClick = onResetMonitoring, // Wire up the reset action
+                onClick = onResetMonitoring,
                 colors = ChipDefaults.primaryChipColors(),
-                enabled = uiState.isPermissionGranted // Should only be resettable if permission is still granted
+                enabled = uiState.isPermissionGranted
             )
-            // Display message if reset is disabled due to permission loss
             if (!uiState.isPermissionGranted) {
                 Text(
                     text = "Grant sensor permission to reset.",
@@ -235,9 +241,8 @@ fun StateDisplay(
             }
         }
 
-        // Permission Handling UI (Conditional)
         if (!uiState.isPermissionGranted) {
-            Spacer(modifier = Modifier.height(4.dp)) // Add space if Reset button isn't shown
+            if(uiState.appState == AppState.MONITORING) Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = "Sensor permission needed for heart rate monitoring.",
                 style = MaterialTheme.typography.caption1,
@@ -251,7 +256,7 @@ fun StateDisplay(
                 onClick = onRequestPermission,
                 colors = ChipDefaults.primaryChipColors()
             )
-            Button( // Changed to Button for visual distinction from action Chips
+            Button(
                 onClick = {
                     Log.i("StateDisplay", "Opening app settings via button.")
                     try {
@@ -260,7 +265,6 @@ fun StateDisplay(
                         context.startActivity(intent)
                     } catch (e: Exception) {
                         Log.e("StateDisplay", "Failed to open app settings", e)
-                        // Optionally show a toast to the user
                     }
                 },
                 modifier = Modifier.padding(top = 4.dp),
@@ -268,22 +272,75 @@ fun StateDisplay(
             ) {
                 Text("Open Settings", style = MaterialTheme.typography.caption2)
             }
-        } else {
-            // Optionally show permission granted status even when monitoring
-            // if (uiState.appState == AppState.MONITORING) { // Only show if not in Gobble Time
-            //     Text(
-            //         text = "Sensor Permission: Granted",
-            //         style = MaterialTheme.typography.caption2,
-            //         textAlign = TextAlign.Center,
-            //         color = MaterialTheme.colors.secondary,
-            //         modifier = Modifier.padding(top = 4.dp)
-            //     )
-            // }
         }
     }
 }
 
+// --- Target Heart Rate Dialog Composable ---
+@Composable
+fun TargetHeartRateDialog(
+    showDialog: Boolean,
+    initialValue: Int,
+    onDismiss: () -> Unit,
+    onConfirm: (Int) -> Unit
+) {
+    var selectedValue by rememberSaveable { mutableIntStateOf(initialValue) }
+    val scrollState = rememberScrollState()
+
+    Dialog(
+        showDialog = showDialog,
+        onDismissRequest = onDismiss,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
+    ) {
+        Alert(
+            title = { Text(text = "Set Target HR", textAlign = TextAlign.Center) },
+            negativeButton = {
+                Button(
+                    onClick = onDismiss,
+                    colors = ButtonDefaults.secondaryButtonColors()
+                ) {
+                    Text("Cancel")
+                }
+            },
+            positiveButton = {
+                Button(
+                    onClick = { onConfirm(selectedValue) }
+                ) {
+                    Text("OK")
+                }
+            },
+        ) {
+            Column(
+                modifier = Modifier.verticalScroll(scrollState),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // *** Explicitly naming Stepper arguments ***
+                Stepper(
+                    value = selectedValue,
+                    onValueChange = { newValue -> selectedValue = newValue },
+                    valueRange = 30..200, // IntRange is an IntProgression
+                    increaseIcon = { Icon(StepperDefaults.Increase, "Increase") },
+                    decreaseIcon = { Icon(StepperDefaults.Decrease, "Decrease") }
+                    // No explicit 'steps' parameter needed if using range directly
+                ) {
+                    Text(
+                        text = "$selectedValue bpm",
+                        style = MaterialTheme.typography.display3
+                    )
+                } // End Stepper trailing lambda (content)
+
+                Spacer(modifier = Modifier.height(12.dp))
+            } // End Column
+        } // End Alert content
+    } // End Dialog
+}
+
+
 // --- Previews ---
+// (Previews remain unchanged)
 @Composable
 private fun rememberPreviewState(
     appState: AppState = AppState.MONITORING,
@@ -305,14 +362,14 @@ private fun rememberPreviewState(
 @Composable
 fun PreviewPermissionNeeded() {
     val previewState = rememberPreviewState(isPermissionGranted = false, lastDisplayedHr = 65)
-    Gobbleoclockv2Theme { WearApp(uiState = previewState, onRequestPermission = {}, onResetMonitoring = {}) }
+    Gobbleoclockv2Theme { WearApp(uiState = previewState, onRequestPermission = {}, onResetMonitoring = {}, onUpdateTargetHeartRate = {}) }
 }
 
 @Preview(device = WearDevices.SMALL_ROUND, showSystemUi = true)
 @Composable
-fun PreviewPermissionGrantedMonitoring() { // Renamed for clarity
+fun PreviewPermissionGrantedMonitoring() {
     val previewState = rememberPreviewState(isPermissionGranted = true, lastDisplayedHr = 72, consecutiveCount = 1)
-    Gobbleoclockv2Theme { WearApp(uiState = previewState, onRequestPermission = {}, onResetMonitoring = {}) }
+    Gobbleoclockv2Theme { WearApp(uiState = previewState, onRequestPermission = {}, onResetMonitoring = {}, onUpdateTargetHeartRate = {}) }
 }
 
 
@@ -323,27 +380,41 @@ fun PreviewGobbleTimePermissionGranted() {
         appState = AppState.GOBBLE_TIME,
         consecutiveCount = 5,
         lastDisplayedHr = 65,
-        isPermissionGranted = true // Reset button should be visible and enabled
+        isPermissionGranted = true
     )
-    Gobbleoclockv2Theme { WearApp(uiState = previewState, onRequestPermission = {}, onResetMonitoring = {}) }
+    Gobbleoclockv2Theme { WearApp(uiState = previewState, onRequestPermission = {}, onResetMonitoring = {}, onUpdateTargetHeartRate = {}) }
 }
 
 @Preview(device = WearDevices.SMALL_ROUND, showSystemUi = true)
 @Composable
-fun PreviewGobbleTimePermissionDenied() { // Added preview for reset disabled state
+fun PreviewGobbleTimePermissionDenied() {
     val previewState = rememberPreviewState(
         appState = AppState.GOBBLE_TIME,
         consecutiveCount = 5,
         lastDisplayedHr = 65,
-        isPermissionGranted = false // Reset button should be visible but disabled
+        isPermissionGranted = false
     )
-    Gobbleoclockv2Theme { WearApp(uiState = previewState, onRequestPermission = {}, onResetMonitoring = {}) }
+    Gobbleoclockv2Theme { WearApp(uiState = previewState, onRequestPermission = {}, onResetMonitoring = {}, onUpdateTargetHeartRate = {}) }
 }
-
 
 @Preview(device = WearDevices.SQUARE, showSystemUi = true)
 @Composable
 fun PreviewSquarePermissionNeeded() {
     val previewState = rememberPreviewState(isPermissionGranted = false)
-    Gobbleoclockv2Theme { WearApp(uiState = previewState, onRequestPermission = {}, onResetMonitoring = {}) }
+    Gobbleoclockv2Theme { WearApp(uiState = previewState, onRequestPermission = {}, onResetMonitoring = {}, onUpdateTargetHeartRate = {}) }
+}
+
+@Preview(device = WearDevices.SMALL_ROUND, showSystemUi = true, backgroundColor = 0xFF000000, showBackground = true)
+@Composable
+fun PreviewTargetHeartRateDialog() {
+    Gobbleoclockv2Theme {
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f))) {
+            TargetHeartRateDialog(
+                showDialog = true,
+                initialValue = 65,
+                onDismiss = {},
+                onConfirm = {}
+            )
+        }
+    }
 }

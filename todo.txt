@@ -1,63 +1,49 @@
 Context: Combined Project Brief & Phased Plan for Wear OS Fasting Heart Rate Monitor v2. This file tracks remaining work.
-
 --- Project Brief & Specifications ---
-
 Project Objective:
-- Create a personal Wear OS application for Galaxy Watch 4+ monitoring real-time heart rate to identify sustained lower periods (potential fasting correlation).
-- Runs primarily as a background Foreground Service.
-- Samples heart rate approximately once per minute (using a time gate filter based on callback time).
-- Triggers a one-time alert (vibrate/beep) and enters "Gobble Time" state after 5 consecutive processed readings <= user-defined Target Heart Rate.
-- Monitoring stops in "Gobble Time" state and only resumes after manual user "Reset".
-- Application state (`appState`, `consecutiveCount`) must persist across app/watch restarts.
-
+Create a personal Wear OS application for Galaxy Watch 4+ monitoring real-time heart rate to identify sustained lower periods (potential fasting correlation).
+Runs primarily as a background Foreground Service.
+Samples heart rate approximately once per minute (using a time gate filter based on callback time).
+Triggers a one-time alert (vibrate/beep) and enters "Gobble Time" state after 5 consecutive processed readings <= user-defined Target Heart Rate.
+Monitoring stops in "Gobble Time" state and only resumes after manual user "Reset".
+Application state (appState, consecutiveCount) must persist across app/watch restarts.
 Target Platform & Tech Stack:
-- Target Device: Samsung Galaxy Watch 4 or later (Wear OS 3+).
-- Development Environment: Android Studio on macOS.
-- Language: Kotlin.
-- Core Libraries: Compose for Wear OS (UI), Jetpack DataStore (Preferences for persistence), Health Services API (passive heart rate monitoring), Lifecycle Service (background execution), Coroutines, ViewModel.
-- Version Control: Git.
+Target Device: Samsung Galaxy Watch 4 or later (Wear OS 3+).
+Development Environment: Android Studio on macOS.
+
+Core Libraries: Compose for Wear OS (UI), Jetpack DataStore (Preferences for persistence), Health Services API (passive heart rate monitoring), Lifecycle Service (background execution), Coroutines, ViewModel.
 
 Core Principles:
-- Simplicity: Easy to understand and use.
-- Clarity: Code and UI should be clear.
-- Battery Consciousness: Prioritize minimizing battery drain (using Passive Monitoring, Foreground Service best practices, unregistering listener when idle).
-- Mandatory Logging: Implement detailed Logcat logging AND persistent file logging viewable within the app for debugging/tweaking.
-- User-Centric: Designed for the primary user's specific needs (initially the developer).
-- No Automated Tests: Focus on manual testing for this version.
-
+Simplicity: Easy to understand and use.
+Clarity: Code and UI should be clear.
+Battery Consciousness: Prioritize minimizing battery drain (using Passive Monitoring, Foreground Service best practices, unregistering listener when idle).
+Mandatory Logging: Implement detailed Logcat logging AND persistent file logging viewable within the app for debugging/tweaking.
+User-Centric: Designed for the primary user's specific needs (initially the developer).
+No Automated Tests: Focus on manual testing for this version.
 Key Design Decisions & Logic Details:
-- Target Heart Rate: User-defined via app setting. User is responsible for determining the appropriate value; no in-app guidance provided. Default: 70 bpm.
-- Sampling Logic: Uses Health Services Passive Listener. To ensure reliability and avoid reacting to transient dips/noise, a time gate (`callbackTimeMillis >= lastProcessedTimestamp + ~55000ms`) is applied based on when the data callback is received. Only *one* reading (the latest in a batch) is processed if the gate condition passes. This aims for roughly 1-minute intervals between *processed* readings but depends on Health Services delivery timing. (Note: Using DataPoint timestamp proved problematic, sticking with callback time).
-- Consecutive Reading Definition: "Consecutive" refers to 5 *sequentially processed readings* (i.e., readings that passed the ~1min time gate) that are <= `targetHeartRate`. The actual time elapsed between these processed readings might be more than 1 minute.
-- Alert Mechanism: A single, one-time system notification (vibrate/beep) is triggered when entering "Gobble Time". If missed, user must manually check the app. This is acceptable for v2.
-- State Persistence (DataStore Keys & Types):
-    - `appState`: String ("MONITORING" / "GOBBLE_TIME"), Default: "MONITORING"
-    - `consecutiveCount`: Integer (0-5), Default: 0
-    - `targetHeartRate`: Integer, Default: 70
-    - `lastProcessedTimestamp`: Long (epoch ms), Default: 0
-    - `lastDisplayedHr`: Integer (optional, for smoother UI updates), Default: 0
-- Background Execution: Mandatory Foreground Service with a persistent notification indicating active monitoring.
-- Permissions (`BODY_SENSORS`, `POST_NOTIFICATIONS` [for Android 13+ alerts]):
-    - App UI checks on launch/resume. If denied, displays explanation and "Grant Permission" button triggering system request. Blocks function until granted. (BODY_SENSORS implemented)
-    - Service checks on start and stops itself if permission is not granted or revoked.
-- In-App Logging: A dedicated UI screen will display timestamped logs read from a persistent file stored in app-internal storage. Will include key events (service state, HR processing, state changes, resets, errors). Basic log management (clear button or rotation) required.
-
---- Remaining Tasks (Batches 2-4 Combined) ---
-
-- [UNBLOCKED] - Implement "Reset" button functionality: Button -> ViewModel -> Repository (`updateAppState`, `updateConsecutiveCount`) -> Service Reaction.
-
-- [UNBLOCKED] - Implement "Set Target Heart Rate" functionality: Input UI -> ViewModel -> Repository (`updateTargetHeartRate`).
-
-- [UNBLOCKED] - Refine UI based on state (e.g., show/hide/enable/disable "Reset" button based on `appState`, potentially disable target setting during `GOBBLE_TIME`).
-
-- [UNBLOCKED] - Implement basic navigation stub for Log screen & Integrate navigation to the Log Viewer screen.
-
-- [UNBLOCKED] - Implement UI logic to check for `POST_NOTIFICATIONS` permission (Android 13+). (Start with placeholder check/log, then integrate with alert).
-
-- [UNBLOCKED] - Implement the alert mechanism when `appState` transitions to `GOBBLE_TIME` within the service. Check `POST_NOTIFICATIONS`. Create/display notification.
-
-- [UNBLOCKED] - Implement persistent file logging: Choose strategy, create logger class/object, add logging calls (Service, Repo, VM, UI), write to internal storage.
-
-- [UNBLOCKED] - Implement the Log Viewer UI screen: Read logs, display in list, implement "Clear Logs".
-
-- [UNBLOCKED] - Commit remaining features iteratively.
+Target Heart Rate: User-defined via app setting. User is responsible for determining the appropriate value; no in-app guidance provided. Default: 70 bpm.
+Sampling Logic: Uses Health Services Passive Listener. To ensure reliability and avoid reacting to transient dips/noise, a time gate (callbackTimeMillis >= lastProcessedTimestamp + ~55000ms) is applied based on when the data callback is received. Only one reading (the latest in a batch) is processed if the gate condition passes. This aims for roughly 1-minute intervals between processed readings but depends on Health Services delivery timing. (Note: Using DataPoint timestamp proved problematic, sticking with callback time).
+Consecutive Reading Definition: "Consecutive" refers to 5 sequentially processed readings (i.e., readings that passed the ~1min time gate) that are <= targetHeartRate. The actual time elapsed between these processed readings might be more than 1 minute.
+Alert Mechanism: A single, one-time system notification (vibrate/beep) is triggered when entering "Gobble Time". If missed, user must manually check the app. This is acceptable for v2.
+State Persistence (DataStore Keys & Types):
+appState: String ("MONITORING" / "GOBBLE_TIME"), Default: "MONITORING"
+consecutiveCount: Integer (0-5), Default: 0
+targetHeartRate: Integer, Default: 70
+lastProcessedTimestamp: Long (epoch ms), Default: 0
+lastDisplayedHr: Integer (optional, for smoother UI updates), Default: 0
+Background Execution: Mandatory Foreground Service with a persistent notification indicating active monitoring.
+Permissions (BODY_SENSORS, POST_NOTIFICATIONS [for Android 13+ alerts]):
+App UI checks on launch/resume. If denied, displays explanation and "Grant Permission" button triggering system request. Blocks function until granted. (BODY_SENSORS implemented)
+Service checks on start and stops itself if permission is not granted or revoked.
+In-App Logging: A dedicated UI screen will display timestamped logs read from a persistent file stored in app-internal storage. Will include key events (service state, HR processing, state changes, resets, errors). Basic log management (clear button or rotation) required.
+--- Remaining Tasks (Updated) ---
+[COMPLETED] - Implement "Reset" button functionality: Button -> ViewModel -> Repository (updateAppState, updateConsecutiveCount) -> Service Reaction.
+[BLOCKED] - Fix Stepper compilation error in TargetHeartRateDialog within MainActivity.kt. The error "None of the following functions can be called with the arguments supplied" persists despite trying explicit argument naming and ensuring type correctness (Int value, IntRange for valueRange). Requires further investigation into Stepper API usage or potential environment/dependency issues.
+[PARTIALLY BLOCKED - Logic Done, UI Blocked] - Implement "Set Target Heart Rate" functionality: Input UI -> ViewModel -> Repository (updateTargetHeartRate). (ViewModel/Repo logic complete, UI implementation blocked by Stepper issue).
+[UNBLOCKED] - Refine UI based on state (e.g., show/hide/enable/disable "Reset" button based on appState, potentially disable target setting during GOBBLE_TIME). (Partially done, can revisit after Stepper fix).
+[UNBLOCKED] - Implement basic navigation stub for Log screen & Integrate navigation to the Log Viewer screen.
+[UNBLOCKED] - Implement UI logic to check for POST_NOTIFICATIONS permission (Android 13+). (Start with placeholder check/log, then integrate with alert).
+[UNBLOCKED] - Implement the alert mechanism when appState transitions to GOBBLE_TIME within the service. Check POST_NOTIFICATIONS. Create/display notification.
+[UNBLOCKED] - Implement persistent file logging: Choose strategy, create logger class/object, add logging calls (Service, Repo, VM, UI), write to internal storage.
+[UNBLOCKED] - Implement the Log Viewer UI screen: Read logs, display in list, implement "Clear Logs".
+[UNBLOCKED] - Commit remaining features iteratively.
