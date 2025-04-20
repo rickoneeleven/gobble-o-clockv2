@@ -6,20 +6,20 @@ agp = "8.9.1"
 kotlin = "2.0.21"
 
 # AndroidX & Jetpack
-activityCompose = "1.8.0" # Keep explicit for now
-# Use the latest BOM for core Compose libs
+activityCompose = "1.8.0"
 composeBom = "2025.04.00"
+# Version for Material 1.x components (needed for standard icons)
+composeMaterial = "1.6.8" # Using a recent Material 1.x version
 coreSplashscreen = "1.0.1"
 datastorePreferences = "1.1.1"
 healthServicesClient = "1.1.0-alpha05"
 lifecycle = "2.8.4"
 
 # Wear OS Specific
-# RE-ADD explicit versions for Wear Compose, using a newer compatible version
-wearComposeMaterial = "1.4.1"  # Use recent stable version
-wearComposeFoundation = "1.4.1" # Use recent stable version
+wearComposeMaterial = "1.4.1"  # Explicit Wear Compose version
+wearComposeFoundation = "1.4.1" # Explicit Wear Compose version
 playServicesWearable = "18.0.0"
-wearToolingPreview = "1.0.0" # Keep explicit
+wearToolingPreview = "1.0.0"
 
 # KotlinX
 coroutines = "1.8.1"
@@ -28,7 +28,7 @@ coroutines = "1.8.1"
 [libraries]
 # AndroidX & Jetpack
 activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" } # Use the updated BOM
+compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" } # The BOM
 core-splashscreen = { group = "androidx.core", name = "core-splashscreen", version.ref = "coreSplashscreen" }
 datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastorePreferences" }
 health-services-client = { group = "androidx.health", name = "health-services-client", version.ref = "healthServicesClient" }
@@ -45,11 +45,19 @@ ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview
 ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
 ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
 
-# Wear Compose (Explicit NEWER Versions)
-# Use new version refs defined above
-compose-foundation = { group = "androidx.wear.compose", name = "compose-foundation", version.ref = "wearComposeFoundation" } # Explicit ref RE-ADDED
-compose-material = { group = "androidx.wear.compose", name = "compose-material", version.ref = "wearComposeMaterial" } # Explicit ref RE-ADDED
-wear-tooling-preview = { group = "androidx.wear", name = "wear-tooling-preview", version.ref = "wearToolingPreview" } # Explicit ref kept
+# --- Compose Material (NON-WEAR) --- Needed for Icons
+# Defines the 'composeMaterial' version reference used below
+compose-material-core = { group = "androidx.compose.material", name = "material", version.ref = "composeMaterial" }
+# Defines the actual icons library we need to add in app/build.gradle.kts
+compose-material-iconsExtended = { group = "androidx.compose.material", name = "material-icons-extended", version.ref = "composeMaterial" }
+
+# --- Wear Compose (Explicit Versions) ---
+# References the 'wearCompose...' version refs defined above
+# Note: Alias 'compose-material' points to WEAR material now. MUST match group/version below
+compose-foundation = { group = "androidx.wear.compose", name = "compose-foundation", version.ref = "wearComposeFoundation" }
+# CRITICAL: Ensure this alias uses the WEAR group and version
+compose-material = { group = "androidx.wear.compose", name = "compose-material", version.ref = "wearComposeMaterial" } # WEAR Material library
+wear-tooling-preview = { group = "androidx.wear", name = "wear-tooling-preview", version.ref = "wearToolingPreview" }
 
 # Google Play Services
 play-services-wearable = { group = "com.google.android.gms", name = "play-services-wearable", version.ref = "playServicesWearable" }

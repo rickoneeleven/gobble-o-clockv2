@@ -2,4 +2,10 @@
     <string name="app_name">gobble-o-clockv2</string>
     <!-- Simplified base greeting format -->
     <string name="greeting_format">Hello, %1$s!</string>
+    <string name="title_activity_wear_icon_test">WearIconTest</string>
+    <!--
+    This string is used for square devices and overridden by hello_world in
+    values-round/strings.xml for round devices.
+    -->
+    <string name="hello_world">From the Square world,\nHello, %1$s!</string>
 </resources>

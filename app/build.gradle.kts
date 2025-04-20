@@ -39,28 +39,36 @@ android {
 }
 
 dependencies {
-
+    // Core Wear OS / AndroidX / Jetpack
     implementation(libs.play.services.wearable)
-    implementation(platform(libs.compose.bom))
+    implementation(platform(libs.compose.bom)) // Use the BOM
     implementation(libs.ui)
     implementation(libs.ui.graphics)
     implementation(libs.ui.tooling.preview)
-    implementation(libs.compose.material)
-    implementation(libs.compose.foundation)
-    implementation(libs.wear.tooling.preview)
     implementation(libs.activity.compose)
     implementation(libs.core.splashscreen)
     implementation(libs.lifecycle.runtime.compose)
 
-    // Added Dependencies per Phase 0
+    // --- Wear Compose UI Libraries ---
+    // CRITICAL: Ensure this pulls the WEAR material alias defined in TOML
+    implementation(libs.compose.material)
+    implementation(libs.compose.foundation) // Alias points to WEAR foundation
+    implementation(libs.wear.tooling.preview)
+
+    // --- Standard Material Libraries (for Icons) ---
+    implementation(libs.compose.material.core)
+    implementation(libs.compose.material.iconsExtended) // Provides Icons.Default.*
+
+    // App Logic & Services Dependencies
     implementation(libs.health.services.client)
     implementation(libs.datastore.preferences)
     implementation(libs.lifecycle.viewmodel.ktx)
     implementation(libs.lifecycle.viewmodel.compose)
     implementation(libs.lifecycle.service)
-    implementation(libs.kotlinx.coroutines.android) // Included explicitly
-    implementation(libs.kotlinx.coroutines.guava) // Added for ListenableFuture.await()
+    implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.kotlinx.coroutines.guava)
 
+    // Testing Dependencies
     androidTestImplementation(platform(libs.compose.bom))
     androidTestImplementation(libs.ui.test.junit4)
     debugImplementation(libs.ui.tooling)
