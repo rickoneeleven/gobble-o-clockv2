@@ -42,153 +42,64 @@ Key Design Decisions & Logic Details:
     - Service checks on start and stops itself if permission is not granted or revoked.
 - In-App Logging: A dedicated UI screen will display timestamped logs read from a persistent file stored in app-internal storage. Will include key events (service state, HR processing, state changes, resets, errors). Basic log management (clear button or rotation) required.
 
---- Phased Implementation Plan (todo.txt format) ---
+--- Phased Implementation Plan (Reorganized Batches) ---
 
---- Phase 0: Project Setup & Foundation ---
+--- Batch 0: Project Setup & Foundation ---
 
-[COMPLETED] - Create local Git repository for the project.
+- [COMPLETED] All Phase 0 tasks.
 
-[COMPLETED] - Create remote Git repository (e.g., GitHub, GitLab) and link local repo.
+--- Batch 1: Stabilize Service & Implement Core Logic ---
 
-[COMPLETED] - Create a new Wear OS project in Android Studio (using "Empty Wear App" template - Kotlin, Compose).
+- [BLOCKED] **Resolve persistent build errors in `HeartRateMonitorService.kt` related to Health Services API.**
+    - **Current Blocker:** `Unresolved reference` error for timestamp methods (`getEndOriginTime`, `getTimeInstant`) on `SampleDataPoint`. This prevents compiling the core data processing logic.
+    - **Root Cause Analysis:** The necessary timestamp methods appear to be missing from the currently used and attempted `androidx.health:health-services-client` library versions (`1.0.0-rc01`, `1.0.0-rc02`, `1.0.0-beta02`). They were likely introduced in later versions.
+    - **Troubleshooting Steps Taken:**
+        - Corrected `PassiveListenerCallback` method signatures (using `onNewDataPointsReceived`, removing `onError`).
+        - Identified `SampleDataPoint` as the correct `DataPoint` subclass for Heart Rate.
+        - Attempted to use `getTimeInstant()` - resulted in `bootInstant` unresolved internal parameter error or `NoSuchMethodError`.
+        - Attempted to use `getEndOriginTime()` - resulted in `Unresolved reference` error.
+        - Switched from custom `serviceJob` to standard `lifecycleScope` for coroutine launching.
+        - Attempted Health Services library updates:
+            - `1.1.0`: Failed to download.
+            - `1.0.0-rc02`: Downloaded, but `getEndOriginTime` still unresolved.
+            - `1.0.0-beta02`: Downloaded, but `getEndOriginTime` still unresolved.
+    - **Next Steps:**
+        - Re-attempt download of a newer stable version (e.g., `1.1.0` or later) if network/cache issues resolve.
+        - OR Inspect the `SampleDataPoint` class definition within the original `1.0.0-rc01` library *very carefully* to find the *actual* timestamp method available in that specific version (might be named differently, e.g., `getTimestamp()`, or require accessing time via a different property).
+        - OR Consider if a different approach (e.g., using `SystemClock.elapsedRealtime()` and calculating offset, although less reliable) is feasible as a last resort if no direct timestamp method is available/usable in `1.0.0-rc01`.
 
-[COMPLETED] - Configure initial `.gitignore` to ignore `.idea/`, `local.properties`, `build/` etc.
+- [PENDING] Inject or provide `PreferencesRepository` to `HeartRateMonitorService` (using DI).
 
-[COMPLETED] - Commit initial project structure and gitignore to Git.
+- [PENDING] Implement the ~1 minute sampling gate logic within the `PassiveListenerCallback` using `lastProcessedTimestamp`. Log processed/skipped status.
 
-[COMPLETED] - Configure `gradle/libs.versions.toml` and `app/build.gradle.kts` with *remaining* necessary dependencies: Health Services, Jetpack DataStore (Preferences), ViewModel, Lifecycle Service, Coroutines (if not already present).
+- [PENDING] Implement heart rate processing: update `lastDisplayedHr` (if used), update `lastProcessedTimestamp` in DataStore.
 
-[COMPLETED] - Sync Gradle project (`File` > `Sync Project with Gradle Files`).
+- [PENDING] Implement target comparison logic (`processed HR <= targetHeartRate`).
 
-[COMPLETED] - Verify basic project setup runs on an emulator or physical Galaxy Watch 4+ after adding dependencies. (Implicitly done by connecting device/syncing)
+- [PENDING] Implement consecutive count update logic (increment or reset). Update `consecutiveCount` in DataStore. Log count changes.
 
-[COMPLETED] - Set up initial project structure (packages: e.g., `presentation`, `service`, `data`, `logging`, `util`) under `app/src/main/java/com/example/gobble_o_clockv2/`.
+- [PENDING] Implement state transition logic (`consecutiveCount >= 5` -> `GOBBLE_TIME`). Update `appState` in DataStore.
 
-[COMPLETED] - Commit dependency and package structure setup to Git.
+- [PENDING] Implement automatic listener unregistration when `appState` becomes `GOBBLE_TIME`. Log state change and unregistration.
 
---- Phase 1: Persistence Layer (DataStore) ---
+- [PENDING] Ensure `HeartRateMonitorService` reads initial state (`appState`, `consecutiveCount`, etc.) from DataStore on start.
 
-[COMPLETED] - Define DataStore preference keys as specified in Project Brief (`appState`, `consecutiveCount`, `targetHeartRate`, `lastProcessedTimestamp`, `lastDisplayedHr`) in a suitable constants file (e.g., `data/DataStoreKeys.kt`).
+- [PENDING] In `HeartRateMonitorService`, implement collection of the `appState` flow from the repository to react to external changes (like Reset).
 
-[COMPLETED] - Define `AppState` enum or sealed class/constants ("MONITORING", "GOBBLE_TIME").
+- [PENDING] Implement Service logic reacting to `appState` changing from `GOBBLE_TIME` -> `MONITORING` (Reset): call `registerPassiveListener()`. Log re-registration.
 
-[COMPLETED] - Create a `PreferencesRepository` class encapsulating DataStore read/write operations using Kotlin Flows. Implement functions for each key with defaults. Use dependency injection principles if comfortable, or simple instantiation for now.
+- [PENDING] Enhance Logcat logging throughout `HeartRateMonitorService` for all implemented logic.
 
-[COMPLETED] - Add manual checks for DataStore read/write functionality if feasible without full UI/Service?? (Deferred to verification via logs during integration)
+- [PENDING] Commit the functional service core.
 
-[COMPLETED] - Commit persistence layer to Git.
+--- Batch 2: Develop UI Structure & ViewModel ---
 
---- Phase 2: Background Service & Health Services Integration ---
+- [PENDING] All Batch 2 tasks.
 
-[COMPLETED] - Create `HeartRateMonitorService` class extending `LifecycleService` in the `service` package.
+--- Batch 3: Integrate UI, Service & Permissions ---
 
-[COMPLETED] - Implement basic Service lifecycle (`onCreate`, `onStartCommand`, `onDestroy`).
+- [PENDING] All Batch 3 tasks.
 
-[COMPLETED] - Implement Foreground Service requirements: notification channel (create in `onCreate`), persistent notification builder, `startForeground` call (in `onStartCommand`).
+--- Batch 4: Implement Alerting & Persistent Logging ---
 
-[COMPLETED] - Add necessary permissions to `app/src/main/AndroidManifest.xml`: `FOREGROUND_SERVICE`, `BODY_SENSORS`, `POST_NOTIFICATIONS`, `FOREGROUND_SERVICE_HEALTH`. `WAKE_LOCK` is already present from template - review if strictly needed later.
-
-[COMPLETED] - Instantiate `PassiveMonitoringClient` in the Service.
-
-[COMPLETED] - Implement `BODY_SENSORS` permission check within Service start logic (log error & stop service if denied initially).
-
-[COMPLETED] - Implement `registerPassiveListener()` function using `passiveMonitoringClient.setPassiveListenerCallback()`. Use appropriate permissions check *before* registering. Added suspend/await.
-
-[COMPLETED] - Implement `unregisterPassiveListener()` function using `passiveMonitoringClient.clearPassiveListenerCallbackAsync()`. Added suspend/await.
-
-[COMPLETED] - Implement the `PassiveListenerCallback` logic: initially log received `PassiveMonitoringData` details.
-
-[PENDING] - Commit initial service and Health Services setup to Git. (Blocked by build errors)
-
---- Phase 2.5: Troubleshoot Build Errors ---
-
-- **Resolve persistent build errors** in `HeartRateMonitorService.kt`.
-    - **Symptoms:** Unresolved references (`PassiveMonitoringData`, `await`), override errors (`onNewDataPoints`, `onError`), potential classpath/dependency issues (`ListenableFuture`).
-    - **Steps Taken:** Added `kotlinx-coroutines-guava` dependency, synced Gradle, multiple code refactors focusing on imports/signatures, Invalidated Caches & Restarted, Rebuilt Project.
-    - **Next Steps:** Verify Gradle dependencies meticulously, try command-line Gradle build (`./gradlew assembleDebug`), manually delete build folders (`.gradle`, `app/build`), check for conflicting transitive dependencies.
-
---- Phase 3: Core Monitoring Logic (in Service) ---
-
-- Inject or provide `PreferencesRepository` to `HeartRateMonitorService`.
-
-- Read initial state (`appState`, `consecutiveCount`, etc.) from DataStore on Service start.
-
-- Implement the ~1 minute sampling gate logic in the listener callback using `lastProcessedTimestamp` (as per Project Brief). Log processed/skipped status.
-
-- If reading processed: update `lastDisplayedHr` (if used), update `lastProcessedTimestamp` in DataStore.
-
-- Implement target comparison (`processed HR <= targetHeartRate`).
-
-- Implement consecutive count update logic (increment or reset to 0). Update `consecutiveCount` in DataStore. Log count changes.
-
-- Implement trigger logic (`consecutiveCount >= 5`): update `appState` to `GOBBLE_TIME` in DataStore.
-
-- Implement logic to call `unregisterPassiveListener()` when `appState` becomes `GOBBLE_TIME`. Log state change and unregistration.
-
-- Enhance Logcat logging for all steps in this phase.
-
-- Commit core service logic to Git.
-
---- Phase 4: Basic User Interface (Compose & ViewModel) ---
-
-- Create `MainViewModel` extending `ViewModel` in the `presentation` package. Inject `PreferencesRepository`.
-
-- Expose `StateFlow`s from `MainViewModel` for `appState`, `targetHeartRate`, `consecutiveCount`, `lastDisplayedHr`, collecting from the repository flows.
-
-- Refactor `MainActivity` to use the `MainViewModel`.
-
-- Update the main `WearApp` composable (or create new ones) to observe the ViewModel's state. Use appropriate Wear Compose components (e.g., `Scaffold`, `ScalingLazyColumn`, `Button`, `Text`).
-
-- Create the "Monitoring" screen composable: Display data from ViewModel. Include access point for Settings (e.g., a button).
-
-- Create the "Gobble Time" screen composable: Display text and "Reset" button. Conditionally display this or Monitoring screen based on `appState`.
-
-- Create basic "Settings" screen/dialog composable (can navigate to this): Display/edit `targetHeartRate` using `TextField` or `Stepper`. Implement saving via ViewModel/Repository.
-
-- Commit basic UI and ViewModel structure to Git.
-
---- Phase 5: Connecting UI, Service & Reset Logic ---
-
-- Implement logic in `MainActivity` (`LaunchedEffect` or similar) to check `appState`. If `MONITORING` & permissions granted, start `HeartRateMonitorService` in foreground.
-
-- Implement "Reset" button action: call ViewModel function -> update `appState` to `MONITORING` & `consecutiveCount` to 0 in DataStore.
-
-- In `HeartRateMonitorService`, collect the `appState` flow from the repository.
-
-- Implement Service logic reacting to `appState` changes: If changes `GOBBLE_TIME` -> `MONITORING` (Reset), call `registerPassiveListener()`. Log re-registration.
-
-- Ensure UI correctly updates based on `appState` changes from Service or Reset button.
-
-- Commit UI-Service connection and Reset logic to Git.
-
---- Phase 6: Alerting & Permissions UI Refinement ---
-
-- Implement alert function in Service: On state -> `GOBBLE_TIME`, use `NotificationManager` for the one-time alert (separate channel, vibration/sound). Check for `POST_NOTIFICATIONS` permission on Android 13+ before posting.
-
-- Refine permission handling in `MainActivity`: Add explicit checks for `BODY_SENSORS` and `POST_NOTIFICATIONS` (if API >= 33) on start/resume. Use Accompanist permissions library or manual checks.
-
-- If permission denied in UI: Display explanation composable with "Grant Permission" button triggering system request flow(s). Conditionally render main UI based on permission status.
-
-- Test permission grant/deny flow from UI. Ensure Service still handles runtime revocation correctly.
-
-- Commit alerting and refined permission handling to Git.
-
---- Phase 7: Persistent Logging & In-App Viewer ---
-
-- Create `FileLogger` utility (object or class) for writing timestamped logs to a file (`context.filesDir`).
-
-- Decide on log format and implement basic file writing (append mode). Consider thread safety if called from multiple places concurrently.
-
-- Integrate `FileLogger.log(...)` calls alongside `Log.d/i/e` for specified key events (service state, HR processing, comparison, count, state changes, reset, errors, permissions).
-
-- Create "LogViewerScreen" composable.
-
-- Add navigation to LogViewerScreen (e.g., button on Monitoring screen, maybe hidden in Settings).
-
-- Implement ViewModel/logic for LogViewerScreen to read log file content.
-
-- Display logs in `ScalingLazyColumn` (newest first likely preferred).
-
-- Add "Clear Logs" button functionality. Consider basic rotation/size limit if needed later.
-
-- Commit logging implementation and viewer UI to Git.
+- [PENDING] All Batch 4 tasks.
