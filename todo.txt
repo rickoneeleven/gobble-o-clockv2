@@ -1,3 +1,4 @@
 - Implement the alert mechanism when appState transitions to GOBBLE_TIME within the service. Check POST_NOTIFICATIONS. Create/display notification (with vibrate/sound).
 
+
 - Implement UI logic to check for POST_NOTIFICATIONS permission (Android 13+). (Integrate with alert mechanism).
