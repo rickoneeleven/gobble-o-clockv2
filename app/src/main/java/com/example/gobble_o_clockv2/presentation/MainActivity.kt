@@ -145,23 +145,13 @@ class MainActivity : ComponentActivity() {
                     Log.i(logTag, "Exact Alarm Permission guidance requested by UI.")
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                         try {
-                            // ACTION_REQUEST_SCHEDULE_EXACT_ALARM is the most direct way for API 31+
-                            // For API 33+, this will show apps that can manage exact alarms.
-                            // For API 31, 32, it directly takes to the special app access screen listing apps.
                             val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
-                                // Optionally add package if this intent supports it directly for API 33+
-                                // to go to *this* app's setting.
-                                // However, ACTION_REQUEST_SCHEDULE_EXACT_ALARM itself often lists apps.
-                                // For broader compatibility, not setting data/package here might be better first.
-                                // data = Uri.fromParts("package", context.packageName, null)
                                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                             }
                             context.startActivity(intent)
                             Log.i(logTag, "Intent to ACTION_REQUEST_SCHEDULE_EXACT_ALARM settings sent.")
                         } catch (e: Exception) {
                             Log.e(logTag, "Failed to start ACTION_REQUEST_SCHEDULE_EXACT_ALARM settings activity. Attempting fallback.", e)
-                            // Fallback: Open general app settings or notification settings for the app
-                            // as ACTION_REQUEST_SCHEDULE_EXACT_ALARM might not be available or behave differently on some OEM devices.
                             try {
                                 val fallbackIntent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                                     data = Uri.fromParts("package", context.packageName, null)
@@ -189,7 +179,6 @@ class MainActivity : ComponentActivity() {
 
     private fun checkAndUpdateAllPermissions(context: Context) {
         Log.d(logTag, "Executing checkAndUpdateAllPermissions.")
-        // Standard permissions
         val sensorsGranted = ContextCompat.checkSelfPermission(context, BODY_SENSORS_PERMISSION) == PackageManager.PERMISSION_GRANTED
         viewModel.updateBodySensorsPermissionStatus(sensorsGranted)
 
@@ -271,7 +260,6 @@ fun StateDisplay(
 ) {
     val scrollState = rememberScrollState()
     var showTargetHrDialog by rememberSaveable { mutableStateOf(false) }
-    // Correctly use a distinct variable for the TargetHoursDialog visibility state
     var showTargetHoursDialogState by rememberSaveable { mutableStateOf(false) }
 
 
@@ -286,12 +274,12 @@ fun StateDisplay(
     )
 
     TargetHoursDialog(
-        showDialog = showTargetHoursDialogState, // Use the corrected state variable
+        showDialog = showTargetHoursDialogState,
         initialValue = uiState.targetHours,
-        onDismiss = { showTargetHoursDialogState = false }, // Use the corrected state variable
+        onDismiss = { showTargetHoursDialogState = false },
         onConfirm = { newValue ->
             onUpdateTargetHours(newValue)
-            showTargetHoursDialogState = false // Use the corrected state variable
+            showTargetHoursDialogState = false
         }
     )
 
@@ -322,7 +310,7 @@ fun StateDisplay(
 
         Chip(
             label = { Text("Target Hours: ${uiState.targetHours}h") },
-            onClick = { if (canChangeSettings) showTargetHoursDialogState = true }, // Use corrected state variable
+            onClick = { if (canChangeSettings) showTargetHoursDialogState = true },
             colors = ChipDefaults.secondaryChipColors(),
             enabled = canChangeSettings,
             modifier = Modifier.fillMaxWidth(0.8f)
@@ -448,7 +436,7 @@ private fun PermissionRequiredContent(
                     try {
                         context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                             data = Uri.fromParts("package", context.packageName, null)
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) // FLAG_ACTIVITY_NEW_TASK is usually fine for this
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         })
                     } catch (e: Exception) {
                         Log.e("PermissionRequired", "Failed to open app details settings for $permissionName.", e)
@@ -470,7 +458,8 @@ fun TargetHeartRateDialog(
 ) {
     val minTargetHr = 30
     val maxTargetHr = 200
-    var selectedValue by rememberSaveable(initialValue, showDialog) { mutableStateOf(initialValue.coerceIn(minTargetHr, maxTargetHr)) }
+    // Use mutableIntStateOf for primitive Int state
+    var selectedValue by rememberSaveable(initialValue, showDialog) { mutableIntStateOf(initialValue.coerceIn(minTargetHr, maxTargetHr)) }
 
     LaunchedEffect(initialValue, showDialog) {
         if (showDialog) {
@@ -508,7 +497,8 @@ fun TargetHoursDialog(
 ) {
     val minTargetHours = 1
     val maxTargetHours = 99
-    var selectedValue by rememberSaveable(initialValue, showDialog) { mutableStateOf(initialValue.coerceIn(minTargetHours, maxTargetHours)) }
+    // Use mutableIntStateOf for primitive Int state
+    var selectedValue by rememberSaveable(initialValue, showDialog) { mutableIntStateOf(initialValue.coerceIn(minTargetHours, maxTargetHours)) }
 
     LaunchedEffect(initialValue, showDialog) {
         if (showDialog) {
@@ -641,6 +631,7 @@ private fun PreviewMonitoringAllPerms() {
 @Composable private fun PreviewTargetHoursDialog() {
     Gobbleoclockv2Theme {
         Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f)), contentAlignment = Alignment.Center) {
+            // Use mutableIntStateOf for preview dialog state as well
             var showDialog by remember { mutableStateOf(true) }
             var targetH by remember { mutableIntStateOf(5) }
             TargetHoursDialog(
