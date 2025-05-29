@@ -46,6 +46,7 @@ class MainViewModel(
 
     // Lazily initialize AlarmManager
     private val alarmManager: AlarmManager by lazy {
+        Log.d(logTag, "Initializing AlarmManager.")
         application.getSystemService(Context.ALARM_SERVICE) as AlarmManager
     }
 
@@ -53,39 +54,47 @@ class MainViewModel(
         Log.i(logTag, "MainViewModel initializing.")
         updateExactAlarmPermissionStatus() // Check and set initial status
 
-        // Log initial preference values from the already injected preferencesRepository
         viewModelScope.launch {
-            Log.d(logTag, "Initial Prefs from repo: AppState=${preferencesRepository.appStateFlow.first()}, TargetHR=${preferencesRepository.targetHeartRateFlow.first()}, TargetHours=${preferencesRepository.targetHoursFlow.first()}, StartTime=${preferencesRepository.monitoringStartTimeFlow.first()}")
+            Log.d(logTag, "Initial Prefs from repo: AppState=${preferencesRepository.appStateFlow.firstOrNull() ?: "N/A"}, TargetHR=${preferencesRepository.targetHeartRateFlow.firstOrNull() ?: "N/A"}, TargetHours=${preferencesRepository.targetHoursFlow.firstOrNull() ?: "N/A"}, StartTime=${preferencesRepository.monitoringStartTimeFlow.firstOrNull() ?: "N/A"}")
             Log.d(logTag, "Initial exact alarm schedulable status from flow: ${_canScheduleExactAlarms.value}")
         }
     }
 
     fun updateBodySensorsPermissionStatus(isGranted: Boolean) {
         if (_bodySensorsPermissionGranted.value != isGranted) {
-            Log.d(logTag, "Updating BODY_SENSORS permission status to: $isGranted")
+            Log.i(logTag, "Updating BODY_SENSORS permission status. Current: ${_bodySensorsPermissionGranted.value}, New: $isGranted")
             _bodySensorsPermissionGranted.value = isGranted
+        } else {
+            Log.d(logTag, "BODY_SENSORS permission status unchanged: $isGranted")
         }
     }
 
     fun updateNotificationsPermissionStatus(isGranted: Boolean) {
         if (_notificationsPermissionGranted.value != isGranted) {
-            Log.d(logTag, "Updating POST_NOTIFICATIONS permission status to: $isGranted")
+            Log.i(logTag, "Updating POST_NOTIFICATIONS permission status. Current: ${_notificationsPermissionGranted.value}, New: $isGranted")
             _notificationsPermissionGranted.value = isGranted
+        } else {
+            Log.d(logTag, "POST_NOTIFICATIONS permission status unchanged: $isGranted")
         }
     }
 
-    // Call this from Activity's onResume to refresh status after user might have changed settings
     fun updateExactAlarmPermissionStatus() {
+        Log.d(logTag, "Attempting to update exact alarm permission status.")
         val canSchedule = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            Log.d(logTag, "Checking alarmManager.canScheduleExactAlarms() on SDK ${Build.VERSION.SDK_INT}")
-            alarmManager.canScheduleExactAlarms()
+            try {
+                Log.d(logTag, "Checking alarmManager.canScheduleExactAlarms() on SDK ${Build.VERSION.SDK_INT}")
+                alarmManager.canScheduleExactAlarms()
+            } catch (e: Exception) {
+                Log.e(logTag, "Error checking canScheduleExactAlarms. Defaulting to false.", e)
+                false
+            }
         } else {
             Log.d(logTag, "SDK < S (${Build.VERSION.SDK_INT}), assuming exact alarms can be scheduled.")
-            true // On versions before S, this permission isn't an issue / check doesn't exist
+            true
         }
 
         if (_canScheduleExactAlarms.value != canSchedule) {
-            Log.i(logTag, "Updating canScheduleExactAlarms status to: $canSchedule")
+            Log.i(logTag, "Updating canScheduleExactAlarms status. Current: ${_canScheduleExactAlarms.value}, New: $canSchedule")
             _canScheduleExactAlarms.value = canSchedule
         } else {
             Log.d(logTag, "canScheduleExactAlarms status unchanged: $canSchedule")
@@ -101,9 +110,8 @@ class MainViewModel(
         preferencesRepository.monitoringStartTimeFlow,
         _bodySensorsPermissionGranted,
         _notificationsPermissionGranted,
-        _canScheduleExactAlarms // Added the new flow
+        _canScheduleExactAlarms
     ) { values ->
-        // Type casting for safety, though combine should provide correct types
         val appStateValue = values[0] as AppState
         val consecutiveCountValue = values[1] as Int
         val lastDisplayedHrValue = values[2] as Int
@@ -112,7 +120,7 @@ class MainViewModel(
         val monitoringStartTimeValue = values[5] as Long
         val sensorsGrantedValue = values[6] as Boolean
         val notificationsGrantedValue = values[7] as Boolean
-        val canScheduleExactAlarmsValue = values[8] as Boolean // Get the new value
+        val canScheduleExactAlarmsValue = values[8] as Boolean
 
         val newState = MainUiState(
             appState = appStateValue,
@@ -123,78 +131,93 @@ class MainViewModel(
             monitoringStartTime = monitoringStartTimeValue,
             isBodySensorsPermissionGranted = sensorsGrantedValue,
             isNotificationsPermissionGranted = notificationsGrantedValue,
-            canScheduleExactAlarms = canScheduleExactAlarmsValue // Populate in UI state
+            canScheduleExactAlarms = canScheduleExactAlarmsValue
         )
-        // Log detailed state changes for debugging, can be made less verbose later
-        // Log.d(logTag, "UI State Combined: $newState")
+        // Log.v(logTag, "UI State Combined. New state: $newState") // Verbose, enable if needed
         newState
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
-        initialValue = MainUiState() // Default initial state
+        initialValue = MainUiState()
     )
 
 
     fun resetMonitoring() {
-        Log.i(logTag, "Reset monitoring requested by UI.")
+        Log.i(logTag, "Action: resetMonitoring requested.")
         viewModelScope.launch {
-            try {
-                if (!_bodySensorsPermissionGranted.value) {
-                    Log.w(logTag, "Reset monitoring blocked: Body Sensors permission is not granted.")
-                    return@launch
-                }
+            if (!_bodySensorsPermissionGranted.value) {
+                Log.w(logTag, "Reset monitoring SKIPPED: Body Sensors permission is not granted.")
+                return@launch
+            }
 
-                val currentMonitoringStartTime = System.currentTimeMillis()
-                Log.i(logTag, "Setting new MonitoringStartTime: $currentMonitoringStartTime")
+            val currentMonitoringStartTime = System.currentTimeMillis()
+            Log.i(logTag, "Preparing to update preferences for reset: New MonitoringStartTime=$currentMonitoringStartTime, New AppState=MONITORING, New ConsecutiveCount=0")
+            try {
                 preferencesRepository.updateMonitoringStartTime(currentMonitoringStartTime)
                 preferencesRepository.updateAppState(AppState.MONITORING)
                 preferencesRepository.updateConsecutiveCount(0)
-                Log.i(logTag, "App state reset to MONITORING, consecutive count cleared, and monitoring start time updated.")
-
+                Log.i(logTag, "Preferences updated successfully for resetMonitoring.")
             } catch (e: IOException) {
-                Log.e(logTag, "IOException during resetMonitoring data store operation.", e)
+                Log.e(logTag, "IOException during resetMonitoring data store operation. StartTime: $currentMonitoringStartTime", e)
             } catch (e: Exception) {
-                Log.e(logTag, "Failed to reset monitoring state.", e)
+                Log.e(logTag, "General exception during resetMonitoring data store operation. StartTime: $currentMonitoringStartTime", e)
             }
         }
     }
 
     fun updateTargetHeartRate(newRate: Int) {
-        Log.i(logTag, "Update target heart rate requested by UI: $newRate")
+        Log.i(logTag, "Action: updateTargetHeartRate requested. NewRate: $newRate")
         val minTargetHr = 30
         val maxTargetHr = 200
         if (newRate < minTargetHr || newRate > maxTargetHr) {
-            Log.w(logTag, "Invalid target heart rate proposed: $newRate (Range: $minTargetHr-$maxTargetHr). Update rejected.")
+            Log.w(logTag, "Invalid target heart rate proposed: $newRate. Valid range: $minTargetHr-$maxTargetHr. Update REJECTED.")
             return
         }
         viewModelScope.launch {
+            Log.d(logTag, "Preparing to update target heart rate preference to: $newRate")
             try {
                 preferencesRepository.updateTargetHeartRate(newRate)
-                Log.i(logTag, "Target heart rate updated successfully to $newRate.")
+                Log.i(logTag, "Target heart rate preference updated successfully to $newRate.")
             } catch (e: IOException) {
-                Log.e(logTag, "IOException during updateTargetHeartRate data store operation.", e)
+                Log.e(logTag, "IOException during updateTargetHeartRate data store operation. NewRate: $newRate", e)
             } catch (e: Exception) {
-                Log.e(logTag, "Failed to update target heart rate.", e)
+                Log.e(logTag, "General exception during updateTargetHeartRate data store operation. NewRate: $newRate", e)
             }
         }
     }
 
     fun updateTargetHours(newHours: Int) {
-        Log.i(logTag, "Update target hours requested by UI: $newHours")
+        Log.i(logTag, "Action: updateTargetHours requested. NewHours: $newHours")
         val minTargetHours = 1
         val maxTargetHours = 99
         if (newHours < minTargetHours || newHours > maxTargetHours) {
-            Log.w(logTag, "Invalid target hours proposed: $newHours (Range: $minTargetHours-$maxTargetHours). Update rejected.")
+            Log.w(logTag, "Invalid target hours proposed: $newHours. Valid range: $minTargetHours-$maxTargetHours. Update REJECTED.")
             return
         }
         viewModelScope.launch {
+            Log.d(logTag, "Preparing to update target hours preference to: $newHours")
             try {
                 preferencesRepository.updateTargetHours(newHours)
-                Log.i(logTag, "Target hours updated successfully to $newHours.")
+                Log.i(logTag, "Target hours preference updated successfully to $newHours.")
             } catch (e: IOException) {
-                Log.e(logTag, "IOException during updateTargetHours data store operation.", e)
+                Log.e(logTag, "IOException during updateTargetHours data store operation. NewHours: $newHours", e)
             } catch (e: Exception) {
-                Log.e(logTag, "Failed to update target hours.", e)
+                Log.e(logTag, "General exception during updateTargetHours data store operation. NewHours: $newHours", e)
+            }
+        }
+    }
+
+    fun stopMonitoringByUser() {
+        Log.i(logTag, "Action: stopMonitoringByUser requested.")
+        viewModelScope.launch {
+            Log.i(logTag, "Preparing to update AppState to GOBBLE_TIME due to user stop request. Current AppState: ${uiState.value.appState}")
+            try {
+                preferencesRepository.updateAppState(AppState.GOBBLE_TIME)
+                Log.i(logTag, "AppState successfully updated to GOBBLE_TIME by user request.")
+            } catch (e: IOException) {
+                Log.e(logTag, "IOException during stopMonitoringByUser (updating AppState to GOBBLE_TIME).", e)
+            } catch (e: Exception) {
+                Log.e(logTag, "General exception during stopMonitoringByUser (updating AppState to GOBBLE_TIME).", e)
             }
         }
     }
@@ -216,7 +239,7 @@ class MainViewModel(
                     val mainApplication = application as? MainApplication
                         ?: throw IllegalStateException("Application instance must be MainApplication for Factory. Found: ${application.javaClass.name}")
                     val preferencesRepository = mainApplication.preferencesRepository
-                    // Pass the MainApplication instance to the ViewModel constructor
+                    Log.d("MainViewModel.Factory", "Creating MainViewModel instance with MainApplication: ${mainApplication.packageName} and PreferencesRepository: $preferencesRepository")
                     return MainViewModel(mainApplication, preferencesRepository) as T
                 }
                 throw IllegalArgumentException("Unknown ViewModel class requested: ${modelClass.name}")
