@@ -1,5 +1,8 @@
 package com.example.gobble_o_clockv2.presentation
 
+import android.app.AlarmManager
+import android.content.Context
+import android.os.Build
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -23,13 +26,15 @@ data class MainUiState(
     val targetHours: Int = 6,    // Default from PreferencesRepository.Defaults
     val monitoringStartTime: Long = 0L, // Default from PreferencesRepository.Defaults
     val isBodySensorsPermissionGranted: Boolean = false,
-    val isNotificationsPermissionGranted: Boolean = false
+    val isNotificationsPermissionGranted: Boolean = false,
+    val canScheduleExactAlarms: Boolean = true // Default to true, will be updated by ViewModel
 )
 
 /**
  * ViewModel for the main application screen.
  */
 class MainViewModel(
+    private val application: MainApplication, // Use MainApplication to get context for AlarmManager
     private val preferencesRepository: PreferencesRepository
 ) : ViewModel() {
 
@@ -37,12 +42,21 @@ class MainViewModel(
 
     private val _bodySensorsPermissionGranted = MutableStateFlow(false)
     private val _notificationsPermissionGranted = MutableStateFlow(false)
+    private val _canScheduleExactAlarms = MutableStateFlow(true) // Initial value, will be updated
+
+    // Lazily initialize AlarmManager
+    private val alarmManager: AlarmManager by lazy {
+        application.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+    }
 
     init {
         Log.i(logTag, "MainViewModel initializing.")
+        updateExactAlarmPermissionStatus() // Check and set initial status
+
         // Log initial preference values from the already injected preferencesRepository
         viewModelScope.launch {
             Log.d(logTag, "Initial Prefs from repo: AppState=${preferencesRepository.appStateFlow.first()}, TargetHR=${preferencesRepository.targetHeartRateFlow.first()}, TargetHours=${preferencesRepository.targetHoursFlow.first()}, StartTime=${preferencesRepository.monitoringStartTimeFlow.first()}")
+            Log.d(logTag, "Initial exact alarm schedulable status from flow: ${_canScheduleExactAlarms.value}")
         }
     }
 
@@ -60,6 +74,24 @@ class MainViewModel(
         }
     }
 
+    // Call this from Activity's onResume to refresh status after user might have changed settings
+    fun updateExactAlarmPermissionStatus() {
+        val canSchedule = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            Log.d(logTag, "Checking alarmManager.canScheduleExactAlarms() on SDK ${Build.VERSION.SDK_INT}")
+            alarmManager.canScheduleExactAlarms()
+        } else {
+            Log.d(logTag, "SDK < S (${Build.VERSION.SDK_INT}), assuming exact alarms can be scheduled.")
+            true // On versions before S, this permission isn't an issue / check doesn't exist
+        }
+
+        if (_canScheduleExactAlarms.value != canSchedule) {
+            Log.i(logTag, "Updating canScheduleExactAlarms status to: $canSchedule")
+            _canScheduleExactAlarms.value = canSchedule
+        } else {
+            Log.d(logTag, "canScheduleExactAlarms status unchanged: $canSchedule")
+        }
+    }
+
     val uiState: StateFlow<MainUiState> = combine(
         preferencesRepository.appStateFlow,
         preferencesRepository.consecutiveCountFlow,
@@ -68,8 +100,10 @@ class MainViewModel(
         preferencesRepository.targetHoursFlow,
         preferencesRepository.monitoringStartTimeFlow,
         _bodySensorsPermissionGranted,
-        _notificationsPermissionGranted
-    ) { values: Array<*> ->
+        _notificationsPermissionGranted,
+        _canScheduleExactAlarms // Added the new flow
+    ) { values ->
+        // Type casting for safety, though combine should provide correct types
         val appStateValue = values[0] as AppState
         val consecutiveCountValue = values[1] as Int
         val lastDisplayedHrValue = values[2] as Int
@@ -78,6 +112,7 @@ class MainViewModel(
         val monitoringStartTimeValue = values[5] as Long
         val sensorsGrantedValue = values[6] as Boolean
         val notificationsGrantedValue = values[7] as Boolean
+        val canScheduleExactAlarmsValue = values[8] as Boolean // Get the new value
 
         val newState = MainUiState(
             appState = appStateValue,
@@ -87,15 +122,16 @@ class MainViewModel(
             targetHours = targetHoursValue,
             monitoringStartTime = monitoringStartTimeValue,
             isBodySensorsPermissionGranted = sensorsGrantedValue,
-            isNotificationsPermissionGranted = notificationsGrantedValue
+            isNotificationsPermissionGranted = notificationsGrantedValue,
+            canScheduleExactAlarms = canScheduleExactAlarmsValue // Populate in UI state
         )
-        // Log.d(logTag, "UI State Updated: $newState") // Can be verbose
+        // Log detailed state changes for debugging, can be made less verbose later
+        // Log.d(logTag, "UI State Combined: $newState")
         newState
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
-        // Use simple, static defaults for initialValue. The combine flow will quickly update it.
-        initialValue = MainUiState()
+        initialValue = MainUiState() // Default initial state
     )
 
 
@@ -178,9 +214,10 @@ class MainViewModel(
                 if (modelClass.isAssignableFrom(MainViewModel::class.java)) {
                     val application = checkNotNull(extras[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY])
                     val mainApplication = application as? MainApplication
-                        ?: throw IllegalStateException("Application instance must be MainApplication for Factory")
+                        ?: throw IllegalStateException("Application instance must be MainApplication for Factory. Found: ${application.javaClass.name}")
                     val preferencesRepository = mainApplication.preferencesRepository
-                    return MainViewModel(preferencesRepository) as T
+                    // Pass the MainApplication instance to the ViewModel constructor
+                    return MainViewModel(mainApplication, preferencesRepository) as T
                 }
                 throw IllegalArgumentException("Unknown ViewModel class requested: ${modelClass.name}")
             }

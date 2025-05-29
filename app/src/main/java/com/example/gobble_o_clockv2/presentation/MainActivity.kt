@@ -102,9 +102,9 @@ class MainActivity : ComponentActivity() {
             )
 
             DisposableEffect(Unit) {
-                Log.d(logTag, "Checking initial permissions.")
-                checkAndUpdatePermissions(context)
-                onDispose { Log.d(logTag, "Permission check effect disposed.") }
+                Log.d(logTag, "DisposableEffect: Checking initial permissions.")
+                checkAndUpdateAllPermissions(context)
+                onDispose { Log.d(logTag, "DisposableEffect for permission check disposed.") }
             }
 
             LaunchedEffect(uiState.isBodySensorsPermissionGranted, uiState.appState) {
@@ -133,33 +133,75 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     } else if (permission.isEmpty()) {
-                        Log.w(logTag, "Attempted to request empty permission.")
+                        Log.w(logTag, "Attempted to request empty permission string.")
                     } else {
-                        Log.d(logTag, "Perm request for '$permissionRequestInProgress' in progress. Ignoring '$permission'.")
+                        Log.d(logTag, "Permission request for '$permissionRequestInProgress' already in progress. Ignoring new request for '$permission'.")
                     }
                 },
                 onResetMonitoring = viewModel::resetMonitoring,
                 onUpdateTargetHeartRate = viewModel::updateTargetHeartRate,
-                onUpdateTargetHours = viewModel::updateTargetHours
+                onUpdateTargetHours = viewModel::updateTargetHours,
+                onRequestExactAlarmPermission = {
+                    Log.i(logTag, "Exact Alarm Permission guidance requested by UI.")
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        try {
+                            // ACTION_REQUEST_SCHEDULE_EXACT_ALARM is the most direct way for API 31+
+                            // For API 33+, this will show apps that can manage exact alarms.
+                            // For API 31, 32, it directly takes to the special app access screen listing apps.
+                            val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                                // Optionally add package if this intent supports it directly for API 33+
+                                // to go to *this* app's setting.
+                                // However, ACTION_REQUEST_SCHEDULE_EXACT_ALARM itself often lists apps.
+                                // For broader compatibility, not setting data/package here might be better first.
+                                // data = Uri.fromParts("package", context.packageName, null)
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            context.startActivity(intent)
+                            Log.i(logTag, "Intent to ACTION_REQUEST_SCHEDULE_EXACT_ALARM settings sent.")
+                        } catch (e: Exception) {
+                            Log.e(logTag, "Failed to start ACTION_REQUEST_SCHEDULE_EXACT_ALARM settings activity. Attempting fallback.", e)
+                            // Fallback: Open general app settings or notification settings for the app
+                            // as ACTION_REQUEST_SCHEDULE_EXACT_ALARM might not be available or behave differently on some OEM devices.
+                            try {
+                                val fallbackIntent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                    data = Uri.fromParts("package", context.packageName, null)
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                context.startActivity(fallbackIntent)
+                                Log.i(logTag, "Fallback: Intent to ACTION_APPLICATION_DETAILS_SETTINGS sent.")
+                            } catch (e2: Exception) {
+                                Log.e(logTag, "Fallback to ACTION_APPLICATION_DETAILS_SETTINGS also failed.", e2)
+                            }
+                        }
+                    } else {
+                        Log.w(logTag, "Exact Alarm Permission guidance requested on pre-SDK S device. This UI path should not be active.")
+                    }
+                }
             )
         }
     }
 
     override fun onResume() {
         super.onResume()
-        Log.d(logTag, "onResume. Re-checking permissions.")
-        checkAndUpdatePermissions(this)
+        Log.d(logTag, "onResume. Re-checking all permissions.")
+        checkAndUpdateAllPermissions(this)
     }
 
-    private fun checkAndUpdatePermissions(context: Context) {
+    private fun checkAndUpdateAllPermissions(context: Context) {
+        Log.d(logTag, "Executing checkAndUpdateAllPermissions.")
+        // Standard permissions
         val sensorsGranted = ContextCompat.checkSelfPermission(context, BODY_SENSORS_PERMISSION) == PackageManager.PERMISSION_GRANTED
         viewModel.updateBodySensorsPermissionStatus(sensorsGranted)
+
         if (requiresNotificationPermission) {
             val notificationsGranted = ContextCompat.checkSelfPermission(context, POST_NOTIFICATIONS_PERMISSION_STRING) == PackageManager.PERMISSION_GRANTED
             viewModel.updateNotificationsPermissionStatus(notificationsGranted)
         } else {
             viewModel.updateNotificationsPermissionStatus(true)
         }
+
+        viewModel.updateExactAlarmPermissionStatus()
+        Log.d(logTag, "Finished checkAndUpdateAllPermissions.")
     }
 
     private fun startHeartRateService(context: Context) {
@@ -189,7 +231,8 @@ fun WearApp(
     onRequestPermission: (String) -> Unit,
     onResetMonitoring: () -> Unit,
     onUpdateTargetHeartRate: (Int) -> Unit,
-    onUpdateTargetHours: (Int) -> Unit
+    onUpdateTargetHours: (Int) -> Unit,
+    onRequestExactAlarmPermission: () -> Unit
 ) {
     Gobbleoclockv2Theme {
         Scaffold(
@@ -208,7 +251,8 @@ fun WearApp(
                     onRequestPermission = onRequestPermission,
                     onResetMonitoring = onResetMonitoring,
                     onUpdateTargetHeartRate = onUpdateTargetHeartRate,
-                    onUpdateTargetHours = onUpdateTargetHours
+                    onUpdateTargetHours = onUpdateTargetHours,
+                    onRequestExactAlarmPermission = onRequestExactAlarmPermission
                 )
             }
         }
@@ -222,11 +266,14 @@ fun StateDisplay(
     onRequestPermission: (String) -> Unit,
     onResetMonitoring: () -> Unit,
     onUpdateTargetHeartRate: (Int) -> Unit,
-    onUpdateTargetHours: (Int) -> Unit
+    onUpdateTargetHours: (Int) -> Unit,
+    onRequestExactAlarmPermission: () -> Unit
 ) {
     val scrollState = rememberScrollState()
     var showTargetHrDialog by rememberSaveable { mutableStateOf(false) }
-    var showTargetHoursDialog by rememberSaveable { mutableStateOf(false) }
+    // Correctly use a distinct variable for the TargetHoursDialog visibility state
+    var showTargetHoursDialogState by rememberSaveable { mutableStateOf(false) }
+
 
     TargetHeartRateDialog(
         showDialog = showTargetHrDialog,
@@ -239,12 +286,12 @@ fun StateDisplay(
     )
 
     TargetHoursDialog(
-        showDialog = showTargetHoursDialog,
+        showDialog = showTargetHoursDialogState, // Use the corrected state variable
         initialValue = uiState.targetHours,
-        onDismiss = { showTargetHoursDialog = false },
+        onDismiss = { showTargetHoursDialogState = false }, // Use the corrected state variable
         onConfirm = { newValue ->
             onUpdateTargetHours(newValue)
-            showTargetHoursDialog = false
+            showTargetHoursDialogState = false // Use the corrected state variable
         }
     )
 
@@ -268,18 +315,37 @@ fun StateDisplay(
         Chip(
             label = { Text("Target HR: ${uiState.targetHeartRate} bpm") },
             onClick = { if (canChangeSettings) showTargetHrDialog = true },
-            colors = ChipDefaults.secondaryChipColors(), // Settings chips are secondary
+            colors = ChipDefaults.secondaryChipColors(),
             enabled = canChangeSettings,
             modifier = Modifier.fillMaxWidth(0.8f)
         )
 
         Chip(
             label = { Text("Target Hours: ${uiState.targetHours}h") },
-            onClick = { if (canChangeSettings) showTargetHoursDialog = true },
-            colors = ChipDefaults.secondaryChipColors(), // Settings chips are secondary
+            onClick = { if (canChangeSettings) showTargetHoursDialogState = true }, // Use corrected state variable
+            colors = ChipDefaults.secondaryChipColors(),
             enabled = canChangeSettings,
             modifier = Modifier.fillMaxWidth(0.8f)
         )
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            uiState.targetHours > 0 &&
+            !uiState.canScheduleExactAlarms &&
+            uiState.appState == AppState.MONITORING) {
+            Chip(
+                label = { Text("Alarm Perm Needed", textAlign = TextAlign.Center) },
+                onClick = onRequestExactAlarmPermission,
+                colors = ChipDefaults.primaryChipColors(backgroundColor = MaterialTheme.colors.error),
+                modifier = Modifier.fillMaxWidth(0.8f).padding(top = 2.dp)
+            )
+            Text(
+                text = "(Tap above to grant 'Alarms & reminders' permission for Target Hours alerts)",
+                style = MaterialTheme.typography.caption2.copy(color = MaterialTheme.colors.error),
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+            )
+        }
+
 
         val settingsDisabledReason = when {
             !uiState.isBodySensorsPermissionGranted && uiState.appState == AppState.MONITORING -> "(Grant Sensors to change)"
@@ -310,7 +376,7 @@ fun StateDisplay(
 
         if (uiState.appState == AppState.MONITORING && uiState.monitoringStartTime > 0L && uiState.targetHours > 0) {
             val alertTimeMillis = uiState.monitoringStartTime + (uiState.targetHours * 60 * 60 * 1000L)
-            val sdf = SimpleDateFormat("HH:mm", Locale.getDefault()) // Use HH for 24-hour format, hh for 12-hour with AM/PM
+            val sdf = SimpleDateFormat("HH:mm", Locale.getDefault())
             Text(
                 text = "Alert By: ${sdf.format(alertTimeMillis)}",
                 style = MaterialTheme.typography.caption1,
@@ -342,16 +408,16 @@ fun StateDisplay(
                 )
                 if (uiState.appState == AppState.GOBBLE_TIME) {
                     Spacer(modifier = Modifier.height(4.dp))
-                    // Corrected: Using standard chipColors for primary actions
                     Chip(label = { Text("Reset Monitor") }, onClick = onResetMonitoring, colors = ChipDefaults.chipColors())
                 }
             }
             else -> {
                 if (uiState.appState == AppState.GOBBLE_TIME) {
-                    // Corrected: Using standard chipColors for primary actions
                     Chip(label = { Text("Reset Monitor") }, onClick = onResetMonitoring, colors = ChipDefaults.chipColors())
                 } else {
-                    Text(text = "Monitoring active...", style = MaterialTheme.typography.caption1, textAlign = TextAlign.Center, color = MaterialTheme.colors.secondary)
+                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || uiState.targetHours == 0 || uiState.canScheduleExactAlarms) {
+                        Text(text = "Monitoring active...", style = MaterialTheme.typography.caption1, textAlign = TextAlign.Center, color = MaterialTheme.colors.secondary)
+                    }
                 }
             }
         }
@@ -373,23 +439,23 @@ private fun PermissionRequiredContent(
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         Text(text = rationale ?: defaultRationale, style = MaterialTheme.typography.caption1, textAlign = TextAlign.Center, color = MaterialTheme.colors.error)
-        // Corrected: Using standard chipColors for primary actions
         Chip(label = { Text("Grant $permissionType") }, onClick = { onRequestPermission(permissionName) }, colors = ChipDefaults.chipColors())
+
         if (permissionName == BODY_SENSORS_PERMISSION) {
             Button(
                 onClick = {
-                    Log.i("PermissionRequired", "Opening app settings for $permissionName.")
+                    Log.i("PermissionRequired", "Opening app details settings for $permissionName.")
                     try {
                         context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                             data = Uri.fromParts("package", context.packageName, null)
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) // FLAG_ACTIVITY_NEW_TASK is usually fine for this
                         })
                     } catch (e: Exception) {
-                        Log.e("PermissionRequired", "Failed to open app settings.", e)
+                        Log.e("PermissionRequired", "Failed to open app details settings for $permissionName.", e)
                     }
                 },
                 modifier = Modifier.padding(top = 2.dp),
-                colors = ButtonDefaults.secondaryButtonColors() // Open Settings can be secondary
+                colors = ButtonDefaults.secondaryButtonColors()
             ) { Text("Open Settings", style = MaterialTheme.typography.caption2) }
         }
     }
@@ -404,7 +470,8 @@ fun TargetHeartRateDialog(
 ) {
     val minTargetHr = 30
     val maxTargetHr = 200
-    var selectedValue by rememberSaveable(initialValue, showDialog) { mutableIntStateOf(initialValue) }
+    var selectedValue by rememberSaveable(initialValue, showDialog) { mutableStateOf(initialValue.coerceIn(minTargetHr, maxTargetHr)) }
+
     LaunchedEffect(initialValue, showDialog) {
         if (showDialog) {
             selectedValue = initialValue.coerceIn(minTargetHr, maxTargetHr)
@@ -416,7 +483,6 @@ fun TargetHeartRateDialog(
             Alert(
                 title = { Text(text = "Set Target HR", textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) },
                 negativeButton = { Button(onClick = onDismiss, colors = ButtonDefaults.secondaryButtonColors()) { Text("Cancel") } },
-                // Corrected: Using standard button colors for dialog confirm
                 positiveButton = { Button(onClick = { onConfirm(selectedValue) }, colors = ButtonDefaults.buttonColors()) { Text("OK") } }
             ) {
                 Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
@@ -442,7 +508,8 @@ fun TargetHoursDialog(
 ) {
     val minTargetHours = 1
     val maxTargetHours = 99
-    var selectedValue by rememberSaveable(initialValue, showDialog) { mutableIntStateOf(initialValue) }
+    var selectedValue by rememberSaveable(initialValue, showDialog) { mutableStateOf(initialValue.coerceIn(minTargetHours, maxTargetHours)) }
+
     LaunchedEffect(initialValue, showDialog) {
         if (showDialog) {
             selectedValue = initialValue.coerceIn(minTargetHours, maxTargetHours)
@@ -458,7 +525,6 @@ fun TargetHoursDialog(
             Alert(
                 title = { Text(text = "Set Target Hours", textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) },
                 negativeButton = { Button(onClick = onDismiss, colors = ButtonDefaults.secondaryButtonColors()) { Text("Cancel") } },
-                // Corrected: Using standard button colors for dialog confirm
                 positiveButton = { Button(onClick = { onConfirm(selectedValue) }, colors = ButtonDefaults.buttonColors()) { Text("OK") } }
             ) {
                 Column(
@@ -507,8 +573,9 @@ private fun rememberPreviewState(
     targetHours: Int = 6,
     monitoringStartTime: Long = System.currentTimeMillis() - (2 * 60 * 60 * 1000L),
     isBodySensorsPermissionGranted: Boolean = false,
-    isNotificationsPermissionGranted: Boolean = false
-): MainUiState = remember(appState, consecutiveCount, lastDisplayedHr, targetHeartRate, targetHours, monitoringStartTime, isBodySensorsPermissionGranted, isNotificationsPermissionGranted) {
+    isNotificationsPermissionGranted: Boolean = false,
+    canScheduleExactAlarms: Boolean = true
+): MainUiState = remember(appState, consecutiveCount, lastDisplayedHr, targetHeartRate, targetHours, monitoringStartTime, isBodySensorsPermissionGranted, isNotificationsPermissionGranted, canScheduleExactAlarms) {
     MainUiState(
         appState = appState,
         consecutiveCount = consecutiveCount,
@@ -517,7 +584,8 @@ private fun rememberPreviewState(
         targetHours = targetHours,
         monitoringStartTime = monitoringStartTime,
         isBodySensorsPermissionGranted = isBodySensorsPermissionGranted,
-        isNotificationsPermissionGranted = isNotificationsPermissionGranted
+        isNotificationsPermissionGranted = isNotificationsPermissionGranted,
+        canScheduleExactAlarms = canScheduleExactAlarms
     )
 }
 
@@ -530,14 +598,42 @@ private fun PreviewWearAppWrapper(uiState: MainUiState, requiresNotificationPerm
             onRequestPermission = {},
             onResetMonitoring = {},
             onUpdateTargetHeartRate = {},
-            onUpdateTargetHours = {}
+            onUpdateTargetHours = {},
+            onRequestExactAlarmPermission = {}
         )
     }
 }
 
+@Preview(device = WearDevices.SMALL_ROUND, showSystemUi = true, name = "Alarm Perm Needed")
+@Composable
+private fun PreviewAlarmPermNeeded() {
+    val state = rememberPreviewState(
+        isBodySensorsPermissionGranted = true,
+        isNotificationsPermissionGranted = true,
+        canScheduleExactAlarms = false,
+        targetHours = 6,
+        lastDisplayedHr = 72
+    )
+    PreviewWearAppWrapper(uiState = state, requiresNotificationPermission = true)
+}
+
+@Preview(device = WearDevices.SMALL_ROUND, showSystemUi = true, name = "Monitoring (All Perms)")
+@Composable
+private fun PreviewMonitoringAllPerms() {
+    val state = rememberPreviewState(
+        isBodySensorsPermissionGranted = true,
+        isNotificationsPermissionGranted = true,
+        canScheduleExactAlarms = true,
+        targetHours = 6,
+        lastDisplayedHr = 72
+    )
+    PreviewWearAppWrapper(uiState = state, requiresNotificationPermission = true)
+}
+
+
 @Preview(device = WearDevices.SMALL_ROUND, showSystemUi = true, name = "Monitoring with Alert Time")
 @Composable private fun PreviewMonitoringWithAlertTime() {
-    val state = rememberPreviewState(isBodySensorsPermissionGranted = true, isNotificationsPermissionGranted = true, lastDisplayedHr = 72, targetHours = 6)
+    val state = rememberPreviewState(isBodySensorsPermissionGranted = true, isNotificationsPermissionGranted = true, lastDisplayedHr = 72, targetHours = 6, canScheduleExactAlarms = true)
     PreviewWearAppWrapper(uiState = state, requiresNotificationPermission = true)
 }
 
@@ -565,6 +661,6 @@ private fun PreviewWearAppWrapper(uiState: MainUiState, requiresNotificationPerm
 
 @Preview(device = WearDevices.SMALL_ROUND, showSystemUi = true, name = "Gobble Time (All Granted)")
 @Composable private fun PreviewGobbleTimeAllGranted() {
-    val state = rememberPreviewState(appState = AppState.GOBBLE_TIME, consecutiveCount = 5, lastDisplayedHr = 65, isBodySensorsPermissionGranted = true, isNotificationsPermissionGranted = true)
+    val state = rememberPreviewState(appState = AppState.GOBBLE_TIME, consecutiveCount = 5, lastDisplayedHr = 65, isBodySensorsPermissionGranted = true, isNotificationsPermissionGranted = true, canScheduleExactAlarms = true)
     PreviewWearAppWrapper(uiState = state, requiresNotificationPermission = true)
 }
