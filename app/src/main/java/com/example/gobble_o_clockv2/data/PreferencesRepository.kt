@@ -18,29 +18,28 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 /**
  * Manages application settings and state persisted via Jetpack DataStore.
  * Provides reactive Flows for observing preference changes and suspend functions for updates.
- * Adheres to simplicity by taking Context directly for instantiation in this phase.
  */
 class PreferencesRepository(private val context: Context) {
 
-    private val logTag: String = this::class.java.simpleName // Use class name for Log Tag
+    private val logTag: String = this::class.java.simpleName
 
     // --- Default Values ---
-    // Encapsulated defaults for consistency and easier modification.
     private object Defaults {
         val APP_STATE = AppState.MONITORING
         const val CONSECUTIVE_COUNT = 0
         const val TARGET_HEART_RATE = 70
         const val LAST_PROCESSED_TIMESTAMP = 0L
-        const val LAST_DISPLAYED_HR = 0 // Or perhaps -1 to indicate no valid initial reading? Using 0 for now.
+        const val LAST_DISPLAYED_HR = 0
+        const val TARGET_HOURS = 6 // Default target hours
+        const val MONITORING_START_TIMESTAMP = 0L // Default to 0, indicating not set or session not started
     }
 
     // --- Flows for Reading Preferences ---
 
-    /** Flow representing the current application state (MONITORING or GOBBLE_TIME). */
     val appStateFlow: Flow<AppState> = context.dataStore.data
         .catch { exception ->
             handleReadException(exception, DataStoreKeys.APP_STATE.name)
-            emit(emptyPreferences()) // Provide empty preferences to allow map to use default
+            emit(emptyPreferences())
         }
         .map { preferences ->
             val stateName = preferences[DataStoreKeys.APP_STATE] ?: Defaults.APP_STATE.name
@@ -48,11 +47,10 @@ class PreferencesRepository(private val context: Context) {
                 AppState.valueOf(stateName)
             } catch (e: IllegalArgumentException) {
                 Log.w(logTag, "Invalid AppState '$stateName' found in DataStore, defaulting to ${Defaults.APP_STATE}.")
-                Defaults.APP_STATE // Return default if stored value is not a valid enum name
+                Defaults.APP_STATE
             }
         }
 
-    /** Flow representing the count of consecutive heart rate readings below the target. */
     val consecutiveCountFlow: Flow<Int> = context.dataStore.data
         .catch { exception ->
             handleReadException(exception, DataStoreKeys.CONSECUTIVE_COUNT.name)
@@ -62,7 +60,6 @@ class PreferencesRepository(private val context: Context) {
             preferences[DataStoreKeys.CONSECUTIVE_COUNT] ?: Defaults.CONSECUTIVE_COUNT
         }
 
-    /** Flow representing the user-defined target heart rate. */
     val targetHeartRateFlow: Flow<Int> = context.dataStore.data
         .catch { exception ->
             handleReadException(exception, DataStoreKeys.TARGET_HEART_RATE.name)
@@ -72,7 +69,6 @@ class PreferencesRepository(private val context: Context) {
             preferences[DataStoreKeys.TARGET_HEART_RATE] ?: Defaults.TARGET_HEART_RATE
         }
 
-    /** Flow representing the timestamp of the last processed heart rate reading. */
     val lastProcessedTimestampFlow: Flow<Long> = context.dataStore.data
         .catch { exception ->
             handleReadException(exception, DataStoreKeys.LAST_PROCESSED_TIMESTAMP.name)
@@ -82,7 +78,6 @@ class PreferencesRepository(private val context: Context) {
             preferences[DataStoreKeys.LAST_PROCESSED_TIMESTAMP] ?: Defaults.LAST_PROCESSED_TIMESTAMP
         }
 
-    /** Flow representing the last heart rate value shown in the UI. */
     val lastDisplayedHrFlow: Flow<Int> = context.dataStore.data
         .catch { exception ->
             handleReadException(exception, DataStoreKeys.LAST_DISPLAYED_HR.name)
@@ -92,9 +87,26 @@ class PreferencesRepository(private val context: Context) {
             preferences[DataStoreKeys.LAST_DISPLAYED_HR] ?: Defaults.LAST_DISPLAYED_HR
         }
 
+    val targetHoursFlow: Flow<Int> = context.dataStore.data
+        .catch { exception ->
+            handleReadException(exception, DataStoreKeys.TARGET_HOURS.name)
+            emit(emptyPreferences())
+        }
+        .map { preferences ->
+            preferences[DataStoreKeys.TARGET_HOURS] ?: Defaults.TARGET_HOURS
+        }
+
+    val monitoringStartTimeFlow: Flow<Long> = context.dataStore.data
+        .catch { exception ->
+            handleReadException(exception, DataStoreKeys.MONITORING_START_TIMESTAMP.name)
+            emit(emptyPreferences())
+        }
+        .map { preferences ->
+            preferences[DataStoreKeys.MONITORING_START_TIMESTAMP] ?: Defaults.MONITORING_START_TIMESTAMP
+        }
+
     // --- Functions for Writing Preferences ---
 
-    /** Updates the application state in DataStore. */
     suspend fun updateAppState(newState: AppState) {
         try {
             context.dataStore.edit { preferences ->
@@ -108,14 +120,12 @@ class PreferencesRepository(private val context: Context) {
         }
     }
 
-    /** Updates the consecutive count in DataStore. */
     suspend fun updateConsecutiveCount(newCount: Int) {
         try {
             context.dataStore.edit { preferences ->
                 preferences[DataStoreKeys.CONSECUTIVE_COUNT] = newCount
             }
-            // Logging potentially too verbose for every count change, uncomment if needed for debugging
-            // Log.d(logTag, "ConsecutiveCount updated to: $newCount")
+            Log.d(logTag, "ConsecutiveCount updated to: $newCount") // Changed to debug for frequent updates
         } catch (exception: IOException) {
             handleWriteException(exception, DataStoreKeys.CONSECUTIVE_COUNT.name, newCount.toString())
         } catch (exception: Exception) {
@@ -123,7 +133,6 @@ class PreferencesRepository(private val context: Context) {
         }
     }
 
-    /** Updates the target heart rate in DataStore. */
     suspend fun updateTargetHeartRate(newRate: Int) {
         try {
             context.dataStore.edit { preferences ->
@@ -137,14 +146,12 @@ class PreferencesRepository(private val context: Context) {
         }
     }
 
-    /** Updates the last processed timestamp in DataStore. */
     suspend fun updateLastProcessedTimestamp(newTimestamp: Long) {
         try {
             context.dataStore.edit { preferences ->
                 preferences[DataStoreKeys.LAST_PROCESSED_TIMESTAMP] = newTimestamp
             }
-            // Verbose logging, uncomment if needed
-            // Log.d(logTag, "LastProcessedTimestamp updated to: $newTimestamp")
+            Log.d(logTag, "LastProcessedTimestamp updated to: $newTimestamp")
         } catch (exception: IOException) {
             handleWriteException(exception, DataStoreKeys.LAST_PROCESSED_TIMESTAMP.name, newTimestamp.toString())
         } catch (exception: Exception) {
@@ -152,14 +159,12 @@ class PreferencesRepository(private val context: Context) {
         }
     }
 
-    /** Updates the last displayed heart rate in DataStore. */
     suspend fun updateLastDisplayedHr(newHr: Int) {
         try {
             context.dataStore.edit { preferences ->
                 preferences[DataStoreKeys.LAST_DISPLAYED_HR] = newHr
             }
-            // Verbose logging, uncomment if needed
-            // Log.d(logTag, "LastDisplayedHr updated to: $newHr")
+            Log.d(logTag, "LastDisplayedHr updated to: $newHr")
         } catch (exception: IOException) {
             handleWriteException(exception, DataStoreKeys.LAST_DISPLAYED_HR.name, newHr.toString())
         } catch (exception: Exception) {
@@ -167,19 +172,39 @@ class PreferencesRepository(private val context: Context) {
         }
     }
 
-    // --- Private Helper Functions ---
-
-    /** Logs details of exceptions encountered during DataStore read operations. */
-    private fun handleReadException(exception: Throwable, keyName: String) {
-        // Log all exceptions encountered during reads for debugging
-        Log.e(logTag, "Error reading preference key '$keyName'. Default value will be used.", exception)
-        // Potential TODO: Implement more specific error handling or reporting if needed
+    suspend fun updateTargetHours(newHours: Int) {
+        try {
+            context.dataStore.edit { preferences ->
+                preferences[DataStoreKeys.TARGET_HOURS] = newHours
+            }
+            Log.i(logTag, "TargetHours updated to: $newHours")
+        } catch (exception: IOException) {
+            handleWriteException(exception, DataStoreKeys.TARGET_HOURS.name, newHours.toString())
+        } catch (exception: Exception) {
+            handleWriteException(exception, DataStoreKeys.TARGET_HOURS.name, newHours.toString())
+        }
     }
 
-    /** Logs details of exceptions encountered during DataStore write operations. */
+    suspend fun updateMonitoringStartTime(newTimestamp: Long) {
+        try {
+            context.dataStore.edit { preferences ->
+                preferences[DataStoreKeys.MONITORING_START_TIMESTAMP] = newTimestamp
+            }
+            Log.i(logTag, "MonitoringStartTime updated to: $newTimestamp")
+        } catch (exception: IOException) {
+            handleWriteException(exception, DataStoreKeys.MONITORING_START_TIMESTAMP.name, newTimestamp.toString())
+        } catch (exception: Exception) {
+            handleWriteException(exception, DataStoreKeys.MONITORING_START_TIMESTAMP.name, newTimestamp.toString())
+        }
+    }
+
+    // --- Private Helper Functions ---
+
+    private fun handleReadException(exception: Throwable, keyName: String) {
+        Log.e(logTag, "Error reading preference key '$keyName'. Default value will be used.", exception)
+    }
+
     private fun handleWriteException(exception: Throwable, keyName: String, value: String) {
-        // Log all exceptions encountered during writes for debugging
         Log.e(logTag, "Error writing preference key '$keyName' with value '$value'. Data may not be saved.", exception)
-        // Potential TODO: Implement retry logic or notify user for critical failures
     }
 }

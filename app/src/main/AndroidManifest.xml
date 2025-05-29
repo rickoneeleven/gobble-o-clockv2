@@ -10,6 +10,18 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" /> <!-- Required for health FGS type on Android 14+ -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Permissions for Exact Alarms -->
+    <!-- For Android 12 (API 31) and above, SCHEDULE_EXACT_ALARM is needed OR app must be exempt -->
+    <!-- For apps targeting Android 13 (API 33) and above, USE_EXACT_ALARM is preferred if user grants it. -->
+    <!-- If targeting Android 14 (API 34) and above, specific foreground service type might be needed for exact alarms if not user granted -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!-- android:usesPermissionFlags="neverForLocation" is an option for SCHEDULE_EXACT_ALARM if location not needed -->
+
+    <!-- USE_EXACT_ALARM is a normal permission the user can grant/deny since Android 13 (Tiramisu) -->
+    <!-- It's an alternative to SCHEDULE_EXACT_ALARM for apps that can request it. -->
+    <!-- We declare SCHEDULE_EXACT_ALARM for broader compatibility, system handles API level differences. -->
+
+
     <application
         android:name=".MainApplication"
         android:allowBackup="true"
@@ -21,10 +33,6 @@
             android:name="com.google.android.wearable"
             android:required="true" />
 
-        <!--
-               Set to true if your app is Standalone, that is, it does not require the handheld
-               app to run.
-        -->
         <meta-data
             android:name="com.google.android.wearable.standalone"
             android:value="true" />
@@ -33,7 +41,7 @@
             android:name="com.example.wearicontest.presentation.WearIconTest"
             android:exported="false"
             android:taskAffinity=""
-            android:theme="@style/WearIconTestTheme.Starting" /> <!-- Main Activity -->
+            android:theme="@style/WearIconTestTheme.Starting" />
         <activity
             android:name=".presentation.MainActivity"
             android:exported="true"
@@ -41,10 +49,9 @@
             android:theme="@style/MainActivityTheme.Starting">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-        </activity> <!-- Heart Rate Monitoring Service Declaration -->
+        </activity>
         <service
             android:name=".service.HeartRateMonitorService"
             android:exported="false"

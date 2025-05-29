@@ -24,4 +24,10 @@ object DataStoreKeys {
 
     // Stores the last heart rate value displayed in the UI (optional, for smoother updates).
     val LAST_DISPLAYED_HR = intPreferencesKey("last_displayed_hr")
+
+    // User-defined target duration in hours for monitoring before an automatic alert.
+    val TARGET_HOURS = intPreferencesKey("target_hours")
+
+    // Stores the timestamp (in milliseconds since epoch) when the current monitoring session started.
+    val MONITORING_START_TIMESTAMP = longPreferencesKey("monitoring_start_timestamp")
 }
