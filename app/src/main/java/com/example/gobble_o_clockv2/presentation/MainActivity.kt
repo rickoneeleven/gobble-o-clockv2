@@ -145,20 +145,20 @@ class MainActivity : ComponentActivity() {
                     Log.i(logTag, "Exact Alarm Permission guidance requested by UI.")
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                         try {
-                            val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            }
+                            // Line 149 area
+                            val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
+                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) // Only NEW_TASK
                             context.startActivity(intent)
-                            Log.i(logTag, "Intent to ACTION_REQUEST_SCHEDULE_EXACT_ALARM settings sent.")
+                            Log.i(logTag, "Intent to ACTION_REQUEST_SCHEDULE_EXACT_ALARM settings sent with NEW_TASK flag.")
                         } catch (e: Exception) {
                             Log.e(logTag, "Failed to start ACTION_REQUEST_SCHEDULE_EXACT_ALARM settings activity. Attempting fallback.", e)
                             try {
-                                val fallbackIntent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                                    data = Uri.fromParts("package", context.packageName, null)
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                }
+                                // Line 158 area
+                                val fallbackIntent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                                fallbackIntent.data = Uri.fromParts("package", context.packageName, null)
+                                fallbackIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) // Only NEW_TASK
                                 context.startActivity(fallbackIntent)
-                                Log.i(logTag, "Fallback: Intent to ACTION_APPLICATION_DETAILS_SETTINGS sent.")
+                                Log.i(logTag, "Fallback: Intent to ACTION_APPLICATION_DETAILS_SETTINGS sent with NEW_TASK flag.")
                             } catch (e2: Exception) {
                                 Log.e(logTag, "Fallback to ACTION_APPLICATION_DETAILS_SETTINGS also failed.", e2)
                             }
@@ -434,10 +434,11 @@ private fun PermissionRequiredContent(
                 onClick = {
                     Log.i("PermissionRequired", "Opening app details settings for $permissionName.")
                     try {
-                        context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                            data = Uri.fromParts("package", context.packageName, null)
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        })
+                        // Line 439 area
+                        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                        intent.data = Uri.fromParts("package", context.packageName, null)
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) // Only NEW_TASK
+                        context.startActivity(intent)
                     } catch (e: Exception) {
                         Log.e("PermissionRequired", "Failed to open app details settings for $permissionName.", e)
                     }
@@ -458,7 +459,6 @@ fun TargetHeartRateDialog(
 ) {
     val minTargetHr = 30
     val maxTargetHr = 200
-    // Use mutableIntStateOf for primitive Int state
     var selectedValue by rememberSaveable(initialValue, showDialog) { mutableIntStateOf(initialValue.coerceIn(minTargetHr, maxTargetHr)) }
 
     LaunchedEffect(initialValue, showDialog) {
@@ -497,7 +497,6 @@ fun TargetHoursDialog(
 ) {
     val minTargetHours = 1
     val maxTargetHours = 99
-    // Use mutableIntStateOf for primitive Int state
     var selectedValue by rememberSaveable(initialValue, showDialog) { mutableIntStateOf(initialValue.coerceIn(minTargetHours, maxTargetHours)) }
 
     LaunchedEffect(initialValue, showDialog) {
@@ -631,7 +630,6 @@ private fun PreviewMonitoringAllPerms() {
 @Composable private fun PreviewTargetHoursDialog() {
     Gobbleoclockv2Theme {
         Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f)), contentAlignment = Alignment.Center) {
-            // Use mutableIntStateOf for preview dialog state as well
             var showDialog by remember { mutableStateOf(true) }
             var targetH by remember { mutableIntStateOf(5) }
             TargetHoursDialog(
